@@ -113,7 +113,7 @@ if images and api_key and target_keyword:
         # Prepare image for OpenAI API
         buffered = BytesIO()
         image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
+        img_bytes = buffered.getvalue()
 
         # Prepare the prompt for OpenAI
         prompt = f"""
@@ -128,25 +128,17 @@ File Name: [optimized_file_name]
 Alt Text: [optimized_alt_text]
 """
 
-        messages = [
-            {"role": "system", "content": "You are an assistant that specializes in SEO optimization for images."},
-            {"role": "user", "content": prompt},
-            {
-                "role": "user",
-                "content": {
-                    "type": "image",
-                    "image": {
-                        "base64": img_str
-                    }
-                }
-            }
-        ]
-
         # Call OpenAI API
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4o-mini",
-                messages=messages
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are an assistant that specializes in SEO optimization for images."},
+                    {"role": "user", "content": prompt}
+                ],
+                files=[
+                    {"name": "image.png", "bytes": img_bytes, "mime_type": "image/png"}
+                ]
             )
             # Extract response
             output = response.choices[0].message['content']
