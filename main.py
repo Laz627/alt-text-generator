@@ -237,15 +237,12 @@ Now, here's the image:
         mime='text/csv'
     )
 
-    # Display images with optimized alt text and file names in a carousel/slider
+    # Display images with optimized alt text and file names in accordions
     st.header("View Optimized Images")
-    if len(images) > 1:
-        idx = st.slider('Select Image', 1, len(images), 1)
-    else:
-        idx = 1
-    image = images[idx - 1]
-    st.image(image, caption=f"Optimized Filename: {optimized_filenames[idx - 1]}", use_column_width=True)
-    st.write(f"**Alt Text:** {alt_texts[idx - 1]}")
+    for idx, image in enumerate(images):
+        with st.expander(f"Image {idx + 1}: {optimized_filenames[idx]}"):
+            st.image(image, caption=f"Optimized Filename: {optimized_filenames[idx]}", use_column_width=False, width=400)
+            st.write(f"**Alt Text:** {alt_texts[idx]}")
 
     # Display any skipped files
     if skipped_files:
