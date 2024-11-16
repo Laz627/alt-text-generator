@@ -4,7 +4,7 @@ import requests
 import base64
 from io import BytesIO
 from PIL import Image
-import openai
+from openai import OpenAI
 
 # Title and Blurb
 st.title("Image SEO Optimizer")
@@ -27,7 +27,7 @@ with st.expander("SEO Best Practices for Image File Names and Alt Text"):
 
     **Use Supported File Formats:**
     - Preferred formats include JPEG, PNG, WebP, SVG, GIF, BMP, and AVIF.
-    - Ensure the file extension matches the image type (e.g., `.jpg` for JPEG files`).
+    - Ensure the file extension matches the image type (e.g., `.jpg` for JPEG files).
 
     **And More...**
     - Place images near relevant text and captions.
@@ -42,7 +42,7 @@ st.header("Enter Your OpenAI API Key")
 api_key = st.text_input("API Key", type="password")
 
 if api_key:
-    openai.api_key = api_key
+    client = OpenAI(api_key=api_key)
 else:
     st.warning("Please enter your OpenAI API key to proceed.")
 
@@ -62,6 +62,7 @@ original_filenames = []
 optimized_filenames = []
 alt_texts = []
 image_sources = []
+skipped_files = []
 
 # Process Uploaded Images
 if uploaded_files:
@@ -77,8 +78,10 @@ if uploaded_files:
                 image_sources.append(None)  # No URL for uploaded files
             except Exception as e:
                 st.error(f"Error processing file {uploaded_file.name}: {e}")
+                skipped_files.append(uploaded_file.name)
         else:
             st.error(f"Unsupported file format: {uploaded_file.name}")
+            skipped_files.append(uploaded_file.name)
 
 # Process Image URLs
 if image_urls_input:
@@ -89,15 +92,17 @@ if image_urls_input:
     for url in url_list:
         try:
             response = requests.get(url)
-            if response.status_code == 200 and 'image' in response.headers['Content-Type']:
+            if response.status_code == 200 and 'image' in response.headers.get('Content-Type', ''):
                 image = Image.open(BytesIO(response.content))
                 images.append(image)
                 original_filenames.append(url.split('/')[-1])
                 image_sources.append(url)
             else:
                 st.error(f"URL does not point to an image or is unreachable: {url}")
+                skipped_files.append(url)
         except Exception as e:
             st.error(f"Error processing image from URL {url}: {e}")
+            skipped_files.append(url)
 
 # Limit to 20 images
 if len(images) > 20:
@@ -113,32 +118,31 @@ if images and api_key and target_keyword:
         # Prepare image for OpenAI API
         buffered = BytesIO()
         image.save(buffered, format="PNG")
-        img_bytes = buffered.getvalue()
+        img_data = buffered.getvalue()
+        base64_image = base64.b64encode(img_data).decode('utf-8')
 
         # Prepare the prompt for OpenAI
-        prompt = f"""
-Analyze the following image and generate an optimized file name and alt text for SEO purposes.
-The target keyword is '{target_keyword}'.
-- Ensure the file name is descriptive, concise, and uses hyphens between words.
-- Ensure the alt text is a natural, informative description of the image, including the target keyword without keyword stuffing.
-
-Provide the output in the following format:
-
-File Name: [optimized_file_name]
-Alt Text: [optimized_alt_text]
-"""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Analyze the following image and generate an optimized file name and alt text for SEO purposes. The target keyword is '{target_keyword}'."},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{base64_image}"
+                        },
+                    },
+                ],
+            }
+        ]
 
         # Call OpenAI API
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are an assistant that specializes in SEO optimization for images."},
-                    {"role": "user", "content": prompt}
-                ],
-                files=[
-                    {"name": "image.png", "bytes": img_bytes, "mime_type": "image/png"}
-                ]
+                messages=messages,
+                max_tokens=200,
             )
             # Extract response
             output = response.choices[0].message['content']
@@ -180,6 +184,12 @@ Alt Text: [optimized_alt_text]
         file_name='optimized_images.csv',
         mime='text/csv'
     )
+
+    # Display any skipped files
+    if skipped_files:
+        st.header("Skipped Files")
+        for file in skipped_files:
+            st.write(f"- {file}")
 
 else:
     if not images:
