@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import requests
 import base64
-import json
 from io import BytesIO
 from PIL import Image
 from openai import OpenAI
+import json  # Added import json
 
 # Title and Blurb
 st.title("Image SEO Optimizer")
@@ -141,8 +141,11 @@ Provide the output **exactly** in the following JSON format:
   "alt_text": "Your optimized alt text here."
 }}
 
+**Note:** Only provide the JSON object with no additional text.
+
 Now, here's the image:
 """
+
         messages = [
             {
                 "role": "user",
