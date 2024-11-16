@@ -124,7 +124,7 @@ if images and api_key and target_keyword:
         img_data = buffered.getvalue()
         base64_image = base64.b64encode(img_data).decode('utf-8')
 
-        # Prepare the prompt with SEO best practices
+        # Prepare the prompt with enhanced descriptions
         prompt = f"""
 You are an assistant that specializes in SEO optimization for images.
 
@@ -135,19 +135,31 @@ The target keyword is '{target_keyword}'.
 **SEO Best Practices for Image File Names and Alt Text:**
 
 - **File Name Guidelines:**
-  - Use short, descriptive, and keyword-rich filenames.
   - Create a unique, descriptive, and concise file name that reflects the specific content of the image.
   - Use hyphens (`-`) between words.
   - Include the target keyword naturally without keyword stuffing.
-  - Use descriptive elements such as colors, materials, objects, or settings observed in the image.
+  - **Include detailed descriptive elements** such as colors, materials, objects, settings, actions, and any other relevant specifics observed in the image.
+  - Keep the file name concise, ideally under 100 characters, while still being descriptive.
   - Ensure the file name has the correct file extension (e.g., `.jpg`, `.png`).
 
 - **Alt Text Guidelines:**
-  - Write a natural, informative description of the image.
+  - Write a natural, **detailed**, and informative description of the image.
   - Include the target keyword naturally without keyword stuffing.
-  - Mention unique aspects of the image to provide context.
-  - Keep it concise, typically under 125 characters.
+  - **Mention all unique aspects of the image** to provide full context.
+  - Keep it concise, typically under 125 characters, but prioritize completeness over brevity if necessary.
   - Ensure alt text aligns with the page content for better accessibility and SEO.
+
+**Examples:**
+
+If the image shows a red wooden chair next to a small round table in a garden:
+
+- Optimized Filename: `red-wooden-chair-round-table-garden-{target_keyword}.jpg`
+- Alt Text: `A red wooden chair beside a small round table set in a lush garden, showcasing {target_keyword}.`
+
+If the image shows a modern kitchen with stainless steel appliances and marble countertops:
+
+- Optimized Filename: `modern-kitchen-stainless-steel-appliances-marble-countertops-{target_keyword}.jpg`
+- Alt Text: `A modern kitchen featuring stainless steel appliances and marble countertops, highlighting {target_keyword}.`
 
 **Provide the output exactly in the following JSON format, without any code block markers or additional text:**
 
@@ -181,7 +193,7 @@ Now, here's the image:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                max_tokens=300,
+                max_tokens=500,
                 temperature=0,  # Ensures consistent output
             )
             # Extract response
@@ -203,6 +215,12 @@ Now, here's the image:
 
             # Sanitize the filename
             optimized_filename = re.sub(r'[^a-zA-Z0-9\-\.]', '', optimized_filename.replace(' ', '-').lower())
+
+            # Truncate filename if it exceeds the maximum length
+            max_filename_length = 100
+            if len(optimized_filename) > max_filename_length:
+                base_name, extension = os.path.splitext(optimized_filename)
+                optimized_filename = f"{base_name[:max_filename_length - len(extension)]}{extension}"
 
             # Ensure filename uniqueness
             if optimized_filename in optimized_filenames:
