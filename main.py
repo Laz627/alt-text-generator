@@ -169,18 +169,18 @@ Now, here's the image:
                 model="gpt-4o-mini",
                 messages=messages,
                 max_tokens=300,
-                temperature=0,  # Makes the output more deterministic
+                temperature=0,  # Ensures consistent output
             )
             # Extract response
             output = response.choices[0].message.content.strip()
-
+        
             # For debugging purposes, print the output
             st.write(f"API Response for image {idx+1}:\n{output}")
-
+        
             # Remove code block markers if present
             if output.startswith("```"):
                 output = output.strip("```json").strip("```").strip()
-
+        
             # Parse the JSON output
             try:
                 result = json.loads(output)
@@ -193,13 +193,13 @@ Now, here's the image:
                 st.write(f"Raw Output: {output}")
                 optimized_filename = f"optimized_image_{idx+1}.png"
                 alt_text = f"An image related to {target_keyword}."
-
+        
             optimized_filenames.append(optimized_filename)
             alt_texts.append(alt_text)
-
+        
             st.write(f"**Optimized File Name:** {optimized_filename}")
             st.write(f"**Alt Text:** {alt_text}")
-
+        
         except Exception as e:
             st.error(f"Error optimizing image {original_filenames[idx]}: {e}")
             optimized_filenames.append(f"optimized_image_{idx+1}.png")
