@@ -122,11 +122,32 @@ if images and api_key and target_keyword:
         base64_image = base64.b64encode(img_data).decode('utf-8')
 
         # Prepare the prompt for OpenAI
+        prompt = f"""
+You are an assistant that specializes in SEO optimization for images.
+
+Analyze the following image and generate an optimized file name and alt text for SEO purposes.
+
+The target keyword is '{target_keyword}'.
+
+- Ensure the file name is descriptive, concise, uses hyphens between words, includes the target keyword naturally, and has the correct file extension.
+
+- Ensure the alt text is a natural, informative description of the image, including the target keyword without keyword stuffing.
+
+Provide the output **exactly** in the following JSON format:
+
+{{
+  "optimized_filename": "your-optimized-file-name.jpg",
+  "alt_text": "Your optimized alt text here."
+}}
+
+Now, here's the image:
+"""
+
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": f"Analyze the following image and generate an optimized file name and alt text for SEO purposes. The target keyword is '{target_keyword}'."},
+                    {"type": "text", "text": prompt},
                     {
                         "type": "image_url",
                         "image_url": {
@@ -142,21 +163,26 @@ if images and api_key and target_keyword:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                max_tokens=200,
+                max_tokens=300,
             )
             # Extract response
-            output = response.choices[0].message.content
-            # Parse the output
-            lines = output.strip().split('\n')
-            file_name_line = next((line for line in lines if line.lower().startswith('file name:')), None)
-            alt_text_line = next((line for line in lines if line.lower().startswith('alt text:')), None)
-            if file_name_line and alt_text_line:
-                optimized_filename = file_name_line.split(':', 1)[1].strip()
-                alt_text = alt_text_line.split(':', 1)[1].strip()
-            else:
+            output = response.choices[0].message.content.strip()
+
+            # For debugging purposes, you can print the output
+            # st.write(f"API Response for image {idx+1}:\n{output}")
+
+            # Parse the JSON output
+            try:
+                result = json.loads(output)
+                optimized_filename = result.get("optimized_filename", f"optimized_image_{idx+1}.png")
+                alt_text = result.get("alt_text", f"An image related to {target_keyword}.")
+            except json.JSONDecodeError as e:
+                st.warning(f"Could not parse JSON response for image {idx+1}, using default values.")
+                # For debugging, you can display the error message
+                # st.write(f"JSONDecodeError: {e}")
                 optimized_filename = f"optimized_image_{idx+1}.png"
                 alt_text = f"An image related to {target_keyword}."
-                st.warning(f"Could not parse the response for image {idx+1}, using default values.")
+
             optimized_filenames.append(optimized_filename)
             alt_texts.append(alt_text)
 
