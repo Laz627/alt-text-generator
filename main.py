@@ -5,7 +5,8 @@ import base64
 from io import BytesIO
 from PIL import Image
 from openai import OpenAI
-import json  # Added import json
+import json
+import time  # Added to include delays if needed
 
 # Title and Blurb
 st.title("Image SEO Optimizer")
@@ -115,6 +116,7 @@ if len(images) > 20:
 if images and api_key and target_keyword:
     st.header("Optimizing Images...")
     for idx, image in enumerate(images):
+        st.subheader(f"Processing Image {idx+1}/{len(images)}")
         st.image(image, caption=f"Original Filename: {original_filenames[idx]}", use_column_width=True)
         # Prepare image for OpenAI API
         buffered = BytesIO()
@@ -167,12 +169,13 @@ Now, here's the image:
                 model="gpt-4o-mini",
                 messages=messages,
                 max_tokens=300,
+                temperature=0,  # Makes the output more deterministic
             )
             # Extract response
             output = response.choices[0].message.content.strip()
 
-            # For debugging purposes, you can print the output
-            # st.write(f"API Response for image {idx+1}:\n{output}")
+            # For debugging purposes, print the output
+            st.write(f"API Response for image {idx+1}:\n{output}")
 
             # Parse the JSON output
             try:
@@ -181,8 +184,9 @@ Now, here's the image:
                 alt_text = result.get("alt_text", f"An image related to {target_keyword}.")
             except json.JSONDecodeError as e:
                 st.warning(f"Could not parse JSON response for image {idx+1}, using default values.")
-                # For debugging, you can display the error message
-                # st.write(f"JSONDecodeError: {e}")
+                st.write(f"JSONDecodeError: {e}")
+                # Optionally, print the raw output for debugging
+                st.write(f"Raw Output: {output}")
                 optimized_filename = f"optimized_image_{idx+1}.png"
                 alt_text = f"An image related to {target_keyword}."
 
@@ -196,6 +200,9 @@ Now, here's the image:
             st.error(f"Error optimizing image {original_filenames[idx]}: {e}")
             optimized_filenames.append(f"optimized_image_{idx+1}.png")
             alt_texts.append(f"An image related to {target_keyword}.")
+
+        # Optional: Add a short delay to avoid rate limits
+        time.sleep(1)
 
     # Provide Downloadable CSV
     st.header("Download Results")
