@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import requests
 import base64
+import re
+import os
 from io import BytesIO
 from PIL import Image
 from openai import OpenAI
@@ -132,18 +134,38 @@ Analyze the following image and generate an optimized file name and alt text for
 
 The target keyword is '{target_keyword}'.
 
-- Ensure the file name is descriptive, concise, uses hyphens between words, includes the target keyword naturally, and has the correct file extension.
+**File Name Guidelines:**
+- Create a unique, descriptive, and concise file name that reflects the specific content of the image.
+- Use hyphens between words.
+- Include the target keyword naturally without keyword stuffing.
+- Use descriptive elements such as colors, materials, objects, or settings observed in the image.
+- Ensure the file name has the correct file extension.
 
-- Ensure the alt text is a natural, informative description of the image, including the target keyword without keyword stuffing.
+**Alt Text Guidelines:**
+- Write a natural, informative description of the image.
+- Include the target keyword naturally without keyword stuffing.
+- Mention unique aspects of the image to provide context.
 
-Provide the output **exactly** in the following JSON format, without any code block markers or additional text:
+**Examples:**
+
+If the image shows a red wooden chair:
+
+- Optimized Filename: "red-wooden-chair-{target_keyword}.jpg"
+- Alt Text: "A red wooden chair showcasing {target_keyword}."
+
+If the image shows a modern kitchen with stainless steel appliances:
+
+- Optimized Filename: "modern-kitchen-stainless-steel-appliances-{target_keyword}.jpg"
+- Alt Text: "A modern kitchen featuring stainless steel appliances and {target_keyword}."
+
+**Provide the output exactly in the following JSON format, without any code block markers or additional text:**
 
 {{
   "optimized_filename": "your-optimized-file-name.jpg",
   "alt_text": "Your optimized alt text here."
 }}
 
-**Note:** Only provide the JSON object. Do not include any markdown formatting or code block markers.
+**Note:** Only provide the JSON object. Do not include any markdown formatting, explanations, or code block markers.
 
 Now, here's the image:
 """
@@ -173,14 +195,14 @@ Now, here's the image:
             )
             # Extract response
             output = response.choices[0].message.content.strip()
-        
+
             # For debugging purposes, print the output
             st.write(f"API Response for image {idx+1}:\n{output}")
-        
+
             # Remove code block markers if present
             if output.startswith("```"):
                 output = output.strip("```json").strip("```").strip()
-        
+
             # Parse the JSON output
             try:
                 result = json.loads(output)
@@ -193,13 +215,21 @@ Now, here's the image:
                 st.write(f"Raw Output: {output}")
                 optimized_filename = f"optimized_image_{idx+1}.png"
                 alt_text = f"An image related to {target_keyword}."
-        
+
+            # Sanitize the filename
+            optimized_filename = re.sub(r'[^a-zA-Z0-9\-\.]', '', optimized_filename.replace(' ', '-').lower())
+
+            # Ensure filename uniqueness
+            if optimized_filename in optimized_filenames:
+                base_name, extension = os.path.splitext(optimized_filename)
+                optimized_filename = f"{base_name}-{idx+1}{extension}"
+
             optimized_filenames.append(optimized_filename)
             alt_texts.append(alt_text)
-        
+
             st.write(f"**Optimized File Name:** {optimized_filename}")
             st.write(f"**Alt Text:** {alt_text}")
-        
+
         except Exception as e:
             st.error(f"Error optimizing image {original_filenames[idx]}: {e}")
             optimized_filenames.append(f"optimized_image_{idx+1}.png")
