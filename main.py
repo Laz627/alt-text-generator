@@ -6,7 +6,7 @@ from io import BytesIO
 from PIL import Image
 from openai import OpenAI
 import json
-import time  # Added to include delays if needed
+import time
 
 # Title and Blurb
 st.title("Image SEO Optimizer")
@@ -136,14 +136,14 @@ The target keyword is '{target_keyword}'.
 
 - Ensure the alt text is a natural, informative description of the image, including the target keyword without keyword stuffing.
 
-Provide the output **exactly** in the following JSON format:
+Provide the output **exactly** in the following JSON format, without any code block markers or additional text:
 
 {{
   "optimized_filename": "your-optimized-file-name.jpg",
   "alt_text": "Your optimized alt text here."
 }}
 
-**Note:** Only provide the JSON object with no additional text.
+**Note:** Only provide the JSON object. Do not include any markdown formatting or code block markers.
 
 Now, here's the image:
 """
@@ -176,6 +176,10 @@ Now, here's the image:
 
             # For debugging purposes, print the output
             st.write(f"API Response for image {idx+1}:\n{output}")
+
+            # Remove code block markers if present
+            if output.startswith("```"):
+                output = output.strip("```json").strip("```").strip()
 
             # Parse the JSON output
             try:
