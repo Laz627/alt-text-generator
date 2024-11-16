@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import base64
+import json
 from io import BytesIO
 from PIL import Image
 from openai import OpenAI
@@ -142,7 +143,6 @@ Provide the output **exactly** in the following JSON format:
 
 Now, here's the image:
 """
-
         messages = [
             {
                 "role": "user",
