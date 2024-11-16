@@ -145,7 +145,7 @@ if images and api_key and target_keyword:
                 max_tokens=200,
             )
             # Extract response
-            output = response.choices[0].message['content']
+            output = response.choices[0].message.content
             # Parse the output
             lines = output.strip().split('\n')
             file_name_line = next((line for line in lines if line.lower().startswith('file name:')), None)
