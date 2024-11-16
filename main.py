@@ -131,7 +131,7 @@ Alt Text: [optimized_alt_text]
         # Call OpenAI API
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are an assistant that specializes in SEO optimization for images."},
                     {"role": "user", "content": prompt}
