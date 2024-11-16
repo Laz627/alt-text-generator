@@ -118,15 +118,13 @@ if len(images) > 20:
 if images and api_key and target_keyword:
     st.header("Optimizing Images...")
     for idx, image in enumerate(images):
-        st.subheader(f"Processing Image {idx+1}/{len(images)}")
-        st.image(image, caption=f"Original Filename: {original_filenames[idx]}", use_column_width=True)
         # Prepare image for OpenAI API
         buffered = BytesIO()
         image.save(buffered, format="PNG")
         img_data = buffered.getvalue()
         base64_image = base64.b64encode(img_data).decode('utf-8')
 
-        # Prepare the prompt for OpenAI
+        # Prepare the prompt with SEO best practices
         prompt = f"""
 You are an assistant that specializes in SEO optimization for images.
 
@@ -134,29 +132,22 @@ Analyze the following image and generate an optimized file name and alt text for
 
 The target keyword is '{target_keyword}'.
 
-**File Name Guidelines:**
-- Create a unique, descriptive, and concise file name that reflects the specific content of the image.
-- Use hyphens between words.
-- Include the target keyword naturally without keyword stuffing.
-- Use descriptive elements such as colors, materials, objects, or settings observed in the image.
-- Ensure the file name has the correct file extension.
+**SEO Best Practices for Image File Names and Alt Text:**
 
-**Alt Text Guidelines:**
-- Write a natural, informative description of the image.
-- Include the target keyword naturally without keyword stuffing.
-- Mention unique aspects of the image to provide context.
+- **File Name Guidelines:**
+  - Use short, descriptive, and keyword-rich filenames.
+  - Create a unique, descriptive, and concise file name that reflects the specific content of the image.
+  - Use hyphens (`-`) between words.
+  - Include the target keyword naturally without keyword stuffing.
+  - Use descriptive elements such as colors, materials, objects, or settings observed in the image.
+  - Ensure the file name has the correct file extension (e.g., `.jpg`, `.png`).
 
-**Examples:**
-
-If the image shows a red wooden chair:
-
-- Optimized Filename: "red-wooden-chair-{target_keyword}.jpg"
-- Alt Text: "A red wooden chair showcasing {target_keyword}."
-
-If the image shows a modern kitchen with stainless steel appliances:
-
-- Optimized Filename: "modern-kitchen-stainless-steel-appliances-{target_keyword}.jpg"
-- Alt Text: "A modern kitchen featuring stainless steel appliances and {target_keyword}."
+- **Alt Text Guidelines:**
+  - Write a natural, informative description of the image.
+  - Include the target keyword naturally without keyword stuffing.
+  - Mention unique aspects of the image to provide context.
+  - Keep it concise, typically under 125 characters.
+  - Ensure alt text aligns with the page content for better accessibility and SEO.
 
 **Provide the output exactly in the following JSON format, without any code block markers or additional text:**
 
@@ -196,9 +187,6 @@ Now, here's the image:
             # Extract response
             output = response.choices[0].message.content.strip()
 
-            # For debugging purposes, print the output
-            st.write(f"API Response for image {idx+1}:\n{output}")
-
             # Remove code block markers if present
             if output.startswith("```"):
                 output = output.strip("```json").strip("```").strip()
@@ -208,11 +196,8 @@ Now, here's the image:
                 result = json.loads(output)
                 optimized_filename = result.get("optimized_filename", f"optimized_image_{idx+1}.png")
                 alt_text = result.get("alt_text", f"An image related to {target_keyword}.")
-            except json.JSONDecodeError as e:
+            except json.JSONDecodeError:
                 st.warning(f"Could not parse JSON response for image {idx+1}, using default values.")
-                st.write(f"JSONDecodeError: {e}")
-                # Optionally, print the raw output for debugging
-                st.write(f"Raw Output: {output}")
                 optimized_filename = f"optimized_image_{idx+1}.png"
                 alt_text = f"An image related to {target_keyword}."
 
@@ -226,9 +211,6 @@ Now, here's the image:
 
             optimized_filenames.append(optimized_filename)
             alt_texts.append(alt_text)
-
-            st.write(f"**Optimized File Name:** {optimized_filename}")
-            st.write(f"**Alt Text:** {alt_text}")
 
         except Exception as e:
             st.error(f"Error optimizing image {original_filenames[idx]}: {e}")
@@ -254,6 +236,16 @@ Now, here's the image:
         file_name='optimized_images.csv',
         mime='text/csv'
     )
+
+    # Display images with optimized alt text and file names in a carousel/slider
+    st.header("View Optimized Images")
+    if len(images) > 1:
+        idx = st.slider('Select Image', 1, len(images), 1)
+    else:
+        idx = 1
+    image = images[idx - 1]
+    st.image(image, caption=f"Optimized Filename: {optimized_filenames[idx - 1]}", use_column_width=True)
+    st.write(f"**Alt Text:** {alt_texts[idx - 1]}")
 
     # Display any skipped files
     if skipped_files:
