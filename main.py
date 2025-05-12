@@ -149,7 +149,7 @@ else:
                         temperature=0.1
                         # response_format={"type": "json_object"} # <--- LINE REMOVED
                     )
-                    output = response.choices.message.content.strip()
+                    output = response.choices[0].message.content.strip()
 
                     # --- BEGIN Manual JSON extraction ---
                     if output.startswith("```json"): output = output.strip("```json").strip("```").strip()
