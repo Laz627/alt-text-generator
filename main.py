@@ -62,7 +62,7 @@ def get_image_from_source(source):
     return image, original_filename, error
 
 # --- Main App UI ---
-st.title("🚀 Image SEO Optimizer")
+st.title("Image SEO Optimizer")
 st.write("**Author:** Brandon Lazovic")
 st.markdown("""
 Welcome to the **Image SEO Optimizer**! This tool enhances your images for SEO by:
@@ -74,7 +74,7 @@ Welcome to the **Image SEO Optimizer**! This tool enhances your images for SEO b
 Upload images or provide URLs, set your parameters, and optimize!
 """)
 
-with st.expander("💡 ricorda: SEO Best Practices for Images"):
+with st.expander("SEO Best Practices for Images"):
     st.markdown("""
     - **Alt Text:** Concise, descriptive, keyword-rich (naturally), contextually relevant. Aim for under 125 characters. Crucial for accessibility and search engines.
     - **File Names:** Short, descriptive, hyphen-separated words, keyword-rich (naturally). Avoid generic names (`IMG001.jpg`). Use `.jpg`, `.png`, `.webp`, `.gif`, `.svg`, etc.
