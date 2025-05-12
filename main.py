@@ -122,6 +122,11 @@ elif not image_sources_input: st.info("➕ Please upload images or provide URLs.
 elif total_images > 20: st.error(f"❌ Too many images ({total_images}). Please provide a maximum of 20 images.")
 else:
     if st.button("✨ Optimize Images", type="primary"):
+        # Ensure target_keyword is not None before processing
+        if not target_keyword:
+             st.error("❌ Target keyword cannot be empty when optimizing.")
+             st.stop() # Stop execution if keyword is missing
+
         client = OpenAI(api_key=api_key)
         st.header("⏳ Processing Images...")
         progress_bar = st.progress(0, text="Initializing...")
@@ -145,26 +150,33 @@ else:
 
             try:
                 compressed_buffer = BytesIO()
-                img_for_compression = image.copy() # Work on a copy for compression
+                img_for_compression = image.copy()
                 if img_for_compression.mode in ('RGBA', 'LA', 'P'):
                      img_for_compression = img_for_compression.convert('RGB')
                 img_for_compression.save(compressed_buffer, format="JPEG", quality=compression_quality, optimize=True)
                 compressed_image_data = compressed_buffer.getvalue()
 
                 openai_image_buffer = BytesIO()
-                image.save(openai_image_buffer, format="PNG") # Send original (or its PNG version) to OpenAI
+                image.save(openai_image_buffer, format="PNG")
                 base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
 
                 # --- START Keyword Sanitization for API ---
-                sanitized_keyword_for_api = target_keyword
+                sanitized_keyword_for_api = target_keyword # Default to original
                 try:
-                    ascii_encoded_keyword = target_keyword.encode('ascii', 'ignore')
-                    sanitized_keyword_for_api = ascii_encoded_keyword.decode('ascii')
-                    if sanitized_keyword_for_api != target_keyword:
-                        print(f"Console Log: Target keyword '{target_keyword}' sanitized to '{sanitized_keyword_for_api}' for API call for image {idx+1} ({original_filename}) due to non-ASCII characters.")
+                    # Ensure target_keyword is a string before encoding
+                    if isinstance(target_keyword, str):
+                        ascii_encoded_keyword = target_keyword.encode('ascii', 'ignore')
+                        sanitized_keyword_for_api = ascii_encoded_keyword.decode('ascii')
+                        if sanitized_keyword_for_api != target_keyword:
+                            print(f"Console Log: Target keyword '{target_keyword}' sanitized to '{sanitized_keyword_for_api}' for API call for image {idx+1} ({original_filename}) due to non-ASCII characters.")
+                    else:
+                         # Should not happen based on st.text_input, but safety check
+                         print(f"Console Log: Warning - target_keyword was not a string for image {idx+1}. Using as is (if possible).")
+                         sanitized_keyword_for_api = str(target_keyword) # Attempt conversion
+
                 except Exception as e:
                     print(f"Console Log: Error during keyword sanitization for API: {e}. Using original keyword: '{target_keyword}'")
-                    sanitized_keyword_for_api = target_keyword # Fallback
+                    # Fallback already handled by defaulting sanitized_keyword_for_api to target_keyword
                 # --- END Keyword Sanitization for API ---
 
                 # Define the prompt using the sanitized keyword
@@ -182,24 +194,25 @@ Output ONLY in this exact JSON format:
   "alt_text": "Your optimized alt text."
 }}
 """
-                # *** ADD THIS DEBUG PRINT STATEMENT ***
+                # *** DEBUG PRINT STATEMENT ***
                 print(f"\n--- DEBUG: Prompt being sent for image {idx+1} ({original_filename}) ---")
-                print(prompt)
-                print("--- END DEBUG Prompt ---\n")
+                print(f"Target Keyword Used in Prompt: '{sanitized_keyword_for_api}'") # Print keyword separately for clarity
+                # print(prompt) # Optionally print the full prompt too
+                print("--- END DEBUG Info ---\n")
                 # *** END DEBUG PRINT STATEMENT ***
+
 
                 messages = [
                     {"role": "user", "content": [
-                        {"type": "text", "text": prompt}, # Ensure 'prompt' variable is used here
+                        {"type": "text", "text": prompt},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
                     ]}
                 ]
 
                 try:
-                    # Make the API call
                     response = client.chat.completions.create(
                         model="gpt-4o-mini",
-                        messages=messages, # Ensure 'messages' variable is used here
+                        messages=messages,
                         max_tokens=150,
                         temperature=0.1,
                         response_format={"type": "json_object"}
@@ -207,17 +220,19 @@ Output ONLY in this exact JSON format:
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename = result.get("base_filename", f"optimized-image-{idx+1}")
-                    alt_text = result.get("alt_text", f"Image related to {target_keyword}")
+                    alt_text = result.get("alt_text", f"Image related to {target_keyword}") # Use original keyword for default alt text
+
                 except Exception as api_e:
                     error_detail = str(api_e)
-                    if isinstance(api_e, UnicodeEncodeError): # Check if it's specifically this error
-                        error_detail += f" This can be caused by non-ASCII characters in the 'Target Keyword' ('{target_keyword}') when sending to the API. The script attempted to sanitize it."
-                    elif "response_format" in error_detail.lower(): # Check if API is complaining about JSON
+                    if isinstance(api_e, UnicodeEncodeError):
+                        error_detail += f" This often happens with non-ASCII characters (like ® ™ ©) in inputs like the 'Target Keyword' ('{target_keyword}'). The script attempted to remove these for the API call (check console log for sanitized version used: '{sanitized_keyword_for_api}'). If the sanitized version looks correct in the log, the issue might be deeper in the request library."
+                    elif "response_format" in error_detail.lower():
                         error_detail += " The API might have had trouble generating valid JSON. Check the prompt or model limitations."
 
                     st.error(f"⚠️ OpenAI API error for image {idx+1} ({original_filename}): {error_detail}. Using default names.")
                     processing_errors.append(f"OpenAI API error for {original_filename}: {error_detail}")
                     base_filename = f"api-error-image-{idx+1}-{sanitized_project_number if sanitized_project_number else ''}".rstrip('-')
+                    # Use original keyword in fallback alt text
                     alt_text = f"Image related to {target_keyword} (API error)"
 
 
@@ -250,8 +265,8 @@ Output ONLY in this exact JSON format:
             except Exception as process_e:
                  skipped_files.append(f"{source_identifier} (Processing Error)")
                  processing_errors.append(f"Error processing {original_filename}: {process_e}")
-                 print(f"--- Error processing {original_filename} ---") # Console log
-                 traceback.print_exc() # Print full traceback to console
+                 print(f"--- Error processing {original_filename} ---")
+                 traceback.print_exc()
                  print("--- End of Error ---")
                  continue
             time.sleep(0.5)
@@ -268,16 +283,14 @@ Output ONLY in this exact JSON format:
                 "Alt Text": item["alt_text"],
                 "Original Source": item["image_url"] if item["image_url"] else "Uploaded"
             } for item in processed_data]
-            if display_df_data: # Ensure there's data for the DataFrame
+            if display_df_data:
                 display_df = pd.DataFrame(display_df_data)
                 st.dataframe(display_df)
-            else:
-                st.info("No data to display in table.")
-
+            else: st.info("No data to display in table.")
 
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                if display_df_data: # Only show button if there's data
+                if display_df_data:
                     csv = display_df.to_csv(index=False).encode('utf-8')
                     st.download_button("📥 Download CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
             with col_dl2:
@@ -285,7 +298,7 @@ Output ONLY in this exact JSON format:
                 with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                     for item in processed_data:
                         zip_file.writestr(item["optimized_filename"], item["compressed_data"])
-                if processed_data: # Only show button if there's data
+                if processed_data:
                     st.download_button("📦 Download Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_download')
 
             st.header("🖼️ Optimized Image Preview")
@@ -297,8 +310,7 @@ Output ONLY in this exact JSON format:
                         else: st.warning("Preview not available for this item.")
                         st.markdown(f"**Alt Text:**")
                         st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{idx_disp}", disabled=True)
-            else:
-                st.info("No images were successfully processed to preview.")
+            else: st.info("No images were successfully processed to preview.")
 
         if skipped_files:
             st.header("⚠️ Skipped / Errored Items")
