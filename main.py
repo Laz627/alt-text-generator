@@ -216,7 +216,6 @@ Output ONLY in this exact JSON format (no extra text or markdown):
         progress_bar.empty(); end_time = time.time()
         st.success(f"✅ Optimization done: {len(processed_data)}/{total_images} images in {end_time - start_time:.2f}s!")
 
-        # --- Results Display Section ---
         if processed_data:
             st.header("📊 Results & Downloads")
             display_df_data = [{"Original Filename": item["original_filename"], "Optimized Filename": item["optimized_filename"],
@@ -258,26 +257,24 @@ Output ONLY in this exact JSON format (no extra text or markdown):
                             try:
                                 compressed_pil_image = Image.open(BytesIO(item["compressed_data"]))
                                 st.markdown("**Compression Comparison (Drag Slider):**")
-                                # --- Use image_comparison component - REMOVED width ---
+                                # --- Use image_comparison component - RE-ADDED width ---
                                 image_comparison(
                                     img1=item["pil_image"],
                                     img2=compressed_pil_image,
                                     label1="Original",
                                     label2=f"WebP Q{compression_quality}",
-                                    width=700, # <-- RE-ADDED explicit width (adjust as needed)
+                                    width=700, # <-- Explicit width (adjust value if needed)
                                     starting_position=50,
                                     show_labels=True,
-                                    make_responsive=True, # Keep responsive for potential adjustments
+                                    make_responsive=True, # Keep for potential adjustments
                                     in_memory=True
                                 )
                             except Exception as img_load_err:
                                 st.warning(f"Could not display comparison slider for image {i_disp+1}: {img_load_err}")
-                                # Fallback: show static original image if slider fails
-                                st.markdown("**Original Image (Preview):**")
+                                st.markdown("**Original Image (Preview):**") # Fallback
                                 st.image(item["pil_image"], width=300)
                         else:
                             st.warning("Comparison slider data missing.")
-                            # Optionally show static original if slider fails/data missing
                             if 'pil_image' in item:
                                 st.markdown("**Original Image (Preview):**")
                                 st.image(item["pil_image"], width=300)
