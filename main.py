@@ -83,7 +83,7 @@ Upload images or provide URLs, set your parameters, and optimize!
 """)
 
 # Collapsible SEO Best Practices
-with st.expander(" ricorda: SEO Best Practices for Images"):
+with st.expander("💡 ricorda: SEO Best Practices for Images"):
     st.markdown("""
     - **Alt Text:** Concise, descriptive, keyword-rich (naturally), contextually relevant. Aim for under 125 characters. Crucial for accessibility and search engines.
     - **File Names:** Short, descriptive, hyphen-separated words, keyword-rich (naturally). Avoid generic names (`IMG001.jpg`). Use `.jpg`, `.png`, `.webp`, `.gif`, `.svg`, etc.
@@ -187,8 +187,25 @@ else:
 
                 # 2. Prepare image for OpenAI (Use original or a PNG version for better analysis)
                 openai_image_buffer = BytesIO()
-                image.save(openai_image_buffer, format="PNG") # Send PNG to OpenAI
+                # Convert to RGB before saving as PNG if it's palette-based ('P') with transparency
+                # This avoids potential issues with OpenAI interpreting some PNG palettes
+                temp_image_for_openai = image
+                if temp_image_for_openai.mode == 'P':
+                     temp_image_for_openai = temp_image_for_openai.convert('RGBA') # Use RGBA to preserve transparency info if any
+                elif temp_image_for_openai.mode == 'LA':
+                     temp_image_for_openai = temp_image_for_openai.convert('RGBA') # Convert Luminance+Alpha too
+
+                # If image wasn't originally RGB (like RGBA, LA), convert to RGB *before* saving as PNG for OpenAI.
+                # This seems counter-intuitive, but helps avoid issues with how the Vision model interprets alpha channels sometimes.
+                # We already converted the main 'image' variable to RGB for JPEG saving if needed.
+                # Let's re-evaluate: Send PNG *with* transparency if present. Revert the conversion here.
+                # image.save(openai_image_buffer, format="PNG") # Send PNG to OpenAI - keep original mode
+                
+                # Let's stick to sending PNG, trying to preserve original mode where possible.
+                # Pillow handles PNG saving correctly for various modes.
+                image.save(openai_image_buffer, format="PNG")
                 base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
+
 
                 # 3. Call OpenAI API for filename and alt text
                 prompt = f"""
@@ -196,8 +213,8 @@ Analyze the image and generate an SEO-optimized file name (without extension ini
 Target Keyword: '{target_keyword}'
 
 Guidelines:
-- Filename: Descriptive, concise, hyphen-separated, naturally include keyword and key visual elements (objects, colors, setting, actions). NO file extension.
-- Alt Text: Natural, descriptive, max 125 chars ideally, include keyword, describe key visual elements. Be specific.
+- Filename: Descriptive, concise, hyphen-separated, naturally include keyword and key visual elements (objects, colors, setting, actions). NO file extension. Be specific but avoid excessive length.
+- Alt Text: Natural, descriptive, max 125 chars ideally, include keyword, describe key visual elements providing context. Be specific.
 
 Output ONLY in this exact JSON format:
 {{
@@ -252,7 +269,9 @@ Output ONLY in this exact JSON format:
                     name, ext = os.path.splitext(final_filename_with_ext)
                     # Avoid adding number if it already ends with -number.ext
                     if name.endswith(f"-{counter-1}"):
-                         name = name[:-(len(str(counter-1))+1)]
+                         name = name[:-(len(str(counter-1))+1)] # Adjust slicing index
+                    # Ensure name doesn't become empty after stripping counter part
+                    if not name: name = f"duplicate-{idx+1}" # Fallback if name becomes empty
                     unique_filename = f"{name}-{counter}{ext}"
                     counter += 1
                 optimized_filenames_set.add(unique_filename)
@@ -271,6 +290,10 @@ Output ONLY in this exact JSON format:
             except Exception as process_e:
                  skipped_files.append(f"{source_identifier} (Processing Error)")
                  processing_errors.append(f"Error processing {original_filename}: {process_e}")
+                 # Also log the traceback for debugging in the console
+                 import traceback
+                 print(f"Error processing {original_filename}:")
+                 traceback.print_exc()
                  continue # Skip to next image
 
             # Optional delay
@@ -292,7 +315,7 @@ Output ONLY in this exact JSON format:
                 "Original Source": item["image_url"] if item["image_url"] else "Uploaded"
             } for item in processed_data])
 
-            st.dataframe(display_df)
+            st.dataframe(display_df) # Display the dataframe
 
             col_dl1, col_dl2 = st.columns(2)
 
@@ -324,25 +347,43 @@ Output ONLY in this exact JSON format:
 
             # Display Images
             st.header("🖼️ Optimized Image Preview")
-            for idx, item in enumerate(processed_data):
-                 with st.expander(f"Image {idx + 1}: {item['optimized_filename']}", expanded=False):
-                    st.image(
-                        item["pil_image"], # Display original PIL object for preview
-                        caption=f"Optimized Filename: {item['optimized_filename']}",
-                        use_column_width=False,
-                        width=300 # Smaller preview width
-                    )
-                    st.markdown(f"**Alt Text:**")
-                    st.text_area("Generated Alt Text", value=item['alt_text'], height=75, key=f"alt_{idx}", disabled=True) # Use text_area for better viewing
+            if processed_data: # Check if there's data before trying to display
+                for idx, item in enumerate(processed_data):
+                     # Use a unique key for each expander
+                    with st.expander(f"Image {idx + 1}: {item.get('optimized_filename', 'N/A')}", expanded=False):
+                        # Check if 'pil_image' exists before displaying
+                        if 'pil_image' in item:
+                            st.image(
+                                item["pil_image"], # Display original PIL object for preview
+                                caption=f"Optimized Filename: {item.get('optimized_filename', 'N/A')}",
+                                width=300 # Set specific width
+                            )
+                        else:
+                            st.warning("Preview not available for this item.")
+
+                        st.markdown(f"**Alt Text:**")
+                        # Use get with a default value for safety
+                        st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{idx}", disabled=True)
+            else:
+                st.info("No images were successfully processed to preview.")
 
 
         # Display Skipped/Errored Files
         if skipped_files:
             st.header("⚠️ Skipped / Errored Items")
+            # Use a set to show unique errors if they are duplicated
+            unique_errors = set(processing_errors)
             for i, file_info in enumerate(skipped_files):
                 st.warning(f"- {file_info}")
+                # Display corresponding error if available (simple matching by index for now)
                 if i < len(processing_errors):
                      st.error(f"  Error: {processing_errors[i]}", icon="🐛")
+            # Optionally print unique errors encountered if list is long
+            # if len(unique_errors) > 5:
+            #    st.subheader("Unique Errors Encountered:")
+            #    for error_msg in unique_errors:
+            #        st.caption(error_msg)
+
 
 # --- Footer ---
 st.markdown("---")
