@@ -122,10 +122,9 @@ elif not image_sources_input: st.info("➕ Please upload images or provide URLs.
 elif total_images > 20: st.error(f"❌ Too many images ({total_images}). Please provide a maximum of 20 images.")
 else:
     if st.button("✨ Optimize Images", type="primary"):
-        # Ensure target_keyword is not None before processing
         if not target_keyword:
              st.error("❌ Target keyword cannot be empty when optimizing.")
-             st.stop() # Stop execution if keyword is missing
+             st.stop()
 
         client = OpenAI(api_key=api_key)
         st.header("⏳ Processing Images...")
@@ -141,12 +140,10 @@ else:
 
             if error:
                 skipped_files.append(f"{source_identifier} (Loading Error)")
-                processing_errors.append(error)
-                continue
+                processing_errors.append(error); continue
             if not image or not original_filename:
                  skipped_files.append(f"{source_identifier} (Load Failed)")
-                 processing_errors.append(f"Failed to load image data for {source_identifier}")
-                 continue
+                 processing_errors.append(f"Failed to load image data for {source_identifier}"); continue
 
             try:
                 compressed_buffer = BytesIO()
@@ -160,27 +157,20 @@ else:
                 image.save(openai_image_buffer, format="PNG")
                 base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
 
-                # --- START Keyword Sanitization for API ---
-                sanitized_keyword_for_api = target_keyword # Default to original
+                sanitized_keyword_for_api = target_keyword
                 try:
-                    # Ensure target_keyword is a string before encoding
                     if isinstance(target_keyword, str):
                         ascii_encoded_keyword = target_keyword.encode('ascii', 'ignore')
                         sanitized_keyword_for_api = ascii_encoded_keyword.decode('ascii')
                         if sanitized_keyword_for_api != target_keyword:
-                            print(f"Console Log: Target keyword '{target_keyword}' sanitized to '{sanitized_keyword_for_api}' for API call for image {idx+1} ({original_filename}) due to non-ASCII characters.")
+                            print(f"Console Log: Target keyword '{target_keyword}' sanitized to '{sanitized_keyword_for_api}' for API for image {idx+1} ({original_filename}).")
                     else:
-                         # Should not happen based on st.text_input, but safety check
-                         print(f"Console Log: Warning - target_keyword was not a string for image {idx+1}. Using as is (if possible).")
-                         sanitized_keyword_for_api = str(target_keyword) # Attempt conversion
-
+                         print(f"Console Log: Warning - target_keyword was not string for image {idx+1}. Using as is.")
+                         sanitized_keyword_for_api = str(target_keyword)
                 except Exception as e:
-                    print(f"Console Log: Error during keyword sanitization for API: {e}. Using original keyword: '{target_keyword}'")
-                    # Fallback already handled by defaulting sanitized_keyword_for_api to target_keyword
-                # --- END Keyword Sanitization for API ---
+                    print(f"Console Log: Error during keyword sanitization: {e}. Using original: '{target_keyword}'")
 
-                # Define the prompt using the sanitized keyword
-                prompt = f"""
+                prompt_text_for_api = f"""
 Analyze the image and generate an SEO-optimized file name (without extension initially) and alt text.
 Target Keyword: '{sanitized_keyword_for_api}'
 
@@ -194,131 +184,114 @@ Output ONLY in this exact JSON format:
   "alt_text": "Your optimized alt text."
 }}
 """
-                # *** DEBUG PRINT STATEMENT ***
-                print(f"\n--- DEBUG: Prompt being sent for image {idx+1} ({original_filename}) ---")
-                print(f"Target Keyword Used in Prompt: '{sanitized_keyword_for_api}'") # Print keyword separately for clarity
-                # print(prompt) # Optionally print the full prompt too
+                final_sanitized_prompt_text = prompt_text_for_api
+                try:
+                    encoded_prompt = prompt_text_for_api.encode('ascii', 'ignore')
+                    final_sanitized_prompt_text = encoded_prompt.decode('ascii')
+                    if final_sanitized_prompt_text != prompt_text_for_api:
+                        print(f"Console Log: Full prompt text was further sanitized for API for image {idx+1} ({original_filename}).")
+                except Exception as e_prompt_sanitize:
+                    print(f"Console Log: Error during full prompt sanitization: {e_prompt_sanitize}. Using as constructed.")
+                
+                print(f"\n--- DEBUG: Content being sent for image {idx+1} ({original_filename}) ---")
+                print(f"Target Keyword originally: '{target_keyword}'")
+                print(f"Sanitized Keyword for API in prompt construction: '{sanitized_keyword_for_api}'")
+                # print(f"Final text content for API message (after full sanitization):\n{final_sanitized_prompt_text}") # Keep this for full debug if needed
+                print(f"First 100 chars of final text for API: {final_sanitized_prompt_text[:100]}...") # Print snippet
                 print("--- END DEBUG Info ---\n")
-                # *** END DEBUG PRINT STATEMENT ***
-
 
                 messages = [
                     {"role": "user", "content": [
-                        {"type": "text", "text": prompt},
+                        {"type": "text", "text": final_sanitized_prompt_text},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
                     ]}
                 ]
 
                 try:
                     response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=messages,
-                        max_tokens=150,
-                        temperature=0.1,
+                        model="gpt-4o-mini", messages=messages, max_tokens=150, temperature=0.1,
                         response_format={"type": "json_object"}
                     )
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename = result.get("base_filename", f"optimized-image-{idx+1}")
-                    alt_text = result.get("alt_text", f"Image related to {target_keyword}") # Use original keyword for default alt text
-
+                    alt_text = result.get("alt_text", f"Image related to {target_keyword}")
                 except Exception as api_e:
                     error_detail = str(api_e)
                     if isinstance(api_e, UnicodeEncodeError):
-                        error_detail += f" This often happens with non-ASCII characters (like ® ™ ©) in inputs like the 'Target Keyword' ('{target_keyword}'). The script attempted to remove these for the API call (check console log for sanitized version used: '{sanitized_keyword_for_api}'). If the sanitized version looks correct in the log, the issue might be deeper in the request library."
+                        error_detail += (f" This often happens with non-ASCII characters (like ® ™ ©) in inputs. "
+                                         f"Original Target Keyword: '{target_keyword}'. "
+                                         f"Keyword used in prompt construction (sanitized): '{sanitized_keyword_for_api}'. "
+                                         f"The entire text content sent to API was also sanitized (see console for 'Final text content...'). "
+                                         f"If all sanitized versions in the log appear correct (no ®), the issue is likely deep within the request library's encoding of the entire request payload or headers, or an environment setting.")
                     elif "response_format" in error_detail.lower():
-                        error_detail += " The API might have had trouble generating valid JSON. Check the prompt or model limitations."
-
-                    st.error(f"⚠️ OpenAI API error for image {idx+1} ({original_filename}): {error_detail}. Using default names.")
+                        error_detail += " API trouble generating JSON. Check prompt/model limits."
+                    st.error(f"⚠️ OpenAI API error for image {idx+1} ({original_filename}): {error_detail}. Using defaults.")
                     processing_errors.append(f"OpenAI API error for {original_filename}: {error_detail}")
-                    base_filename = f"api-error-image-{idx+1}-{sanitized_project_number if sanitized_project_number else ''}".rstrip('-')
-                    # Use original keyword in fallback alt text
+                    base_filename = f"api-error-{idx+1}-{sanitized_project_number if sanitized_project_number else ''}".rstrip('-')
                     alt_text = f"Image related to {target_keyword} (API error)"
 
-
                 final_base_filename = sanitize_filename(base_filename)
-                if sanitized_project_number:
-                    final_base_filename += f"-{sanitized_project_number}"
+                if sanitized_project_number: final_base_filename += f"-{sanitized_project_number}"
                 final_filename_with_ext = f"{final_base_filename}.jpg"
                 final_filename_with_ext = truncate_filename(final_filename_with_ext)
 
-                unique_filename = final_filename_with_ext
-                counter = 1
+                unique_filename = final_filename_with_ext; counter = 1
                 while unique_filename in optimized_filenames_set:
                     name, ext = os.path.splitext(final_filename_with_ext)
                     name_part_to_strip = f"-{counter-1}"
-                    if name.endswith(name_part_to_strip):
-                         name = name[:-len(name_part_to_strip)]
+                    if name.endswith(name_part_to_strip): name = name[:-len(name_part_to_strip)]
                     if not name: name = f"duplicate-base-{idx+1}"
-                    unique_filename = f"{name}-{counter}{ext}"
-                    counter += 1
+                    unique_filename = f"{name}-{counter}{ext}"; counter += 1
                 optimized_filenames_set.add(unique_filename)
 
                 processed_data.append({
-                    "original_filename": original_filename,
-                    "optimized_filename": unique_filename,
-                    "alt_text": alt_text,
-                    "image_url": source if isinstance(source, str) else None,
-                    "compressed_data": compressed_image_data,
-                    "pil_image": image
+                    "original_filename": original_filename, "optimized_filename": unique_filename,
+                    "alt_text": alt_text, "image_url": source if isinstance(source, str) else None,
+                    "compressed_data": compressed_image_data, "pil_image": image
                 })
             except Exception as process_e:
                  skipped_files.append(f"{source_identifier} (Processing Error)")
                  processing_errors.append(f"Error processing {original_filename}: {process_e}")
-                 print(f"--- Error processing {original_filename} ---")
-                 traceback.print_exc()
-                 print("--- End of Error ---")
+                 print(f"--- Error processing {original_filename} ---"); traceback.print_exc(); print("--- End of Error ---")
                  continue
             time.sleep(0.5)
 
-        progress_bar.empty()
-        end_time = time.time()
+        progress_bar.empty(); end_time = time.time()
         st.success(f"✅ Optimization complete for {len(processed_data)} of {total_images} images in {end_time - start_time:.2f} seconds!")
 
         if processed_data:
             st.header("📊 Results & Downloads")
-            display_df_data = [{
-                "Original Filename": item["original_filename"],
-                "Optimized Filename": item["optimized_filename"],
-                "Alt Text": item["alt_text"],
-                "Original Source": item["image_url"] if item["image_url"] else "Uploaded"
-            } for item in processed_data]
-            if display_df_data:
-                display_df = pd.DataFrame(display_df_data)
-                st.dataframe(display_df)
+            display_df_data = [{"Original Filename":i["original_filename"],"Optimized Filename":i["optimized_filename"],"Alt Text":i["alt_text"],"Original Source":i["image_url"] if i["image_url"] else "Uploaded"} for i in processed_data]
+            if display_df_data: st.dataframe(pd.DataFrame(display_df_data))
             else: st.info("No data to display in table.")
 
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
                 if display_df_data:
-                    csv = display_df.to_csv(index=False).encode('utf-8')
-                    st.download_button("📥 Download CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
+                    csv = pd.DataFrame(display_df_data).to_csv(index=False).encode('utf-8')
+                    st.download_button("📥 CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
             with col_dl2:
-                zip_buffer = BytesIO()
-                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                    for item in processed_data:
-                        zip_file.writestr(item["optimized_filename"], item["compressed_data"])
                 if processed_data:
-                    st.download_button("📦 Download Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_download')
+                    zip_buffer = BytesIO()
+                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                        for item in processed_data: zf.writestr(item["optimized_filename"], item["compressed_data"])
+                    st.download_button("📦 Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_download')
 
             st.header("🖼️ Optimized Image Preview")
             if processed_data:
-                for idx_disp, item in enumerate(processed_data):
-                    with st.expander(f"Image {idx_disp + 1}: {item.get('optimized_filename', 'N/A')}", expanded=False):
-                        if 'pil_image' in item:
-                            st.image(item["pil_image"], caption=f"Optimized Filename: {item.get('optimized_filename', 'N/A')}", width=300)
-                        else: st.warning("Preview not available for this item.")
+                for i_disp, item in enumerate(processed_data):
+                    with st.expander(f"Image {i_disp + 1}: {item.get('optimized_filename', 'N/A')}", expanded=False):
+                        if 'pil_image' in item: st.image(item["pil_image"], caption=f"Optimized Filename: {item.get('optimized_filename', 'N/A')}", width=300)
+                        else: st.warning("Preview not available.")
                         st.markdown(f"**Alt Text:**")
-                        st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{idx_disp}", disabled=True)
-            else: st.info("No images were successfully processed to preview.")
+                        st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{i_disp}", disabled=True)
+            else: st.info("No images processed to preview.")
 
         if skipped_files:
             st.header("⚠️ Skipped / Errored Items")
             for i, file_info in enumerate(skipped_files):
                 st.warning(f"- {file_info}")
-                if i < len(processing_errors):
-                     st.error(f"  Error details: {processing_errors[i]}", icon="🐛")
+                if i < len(processing_errors): st.error(f"  Error details: {processing_errors[i]}", icon="🐛")
 
-# --- Footer ---
-st.markdown("---")
-st.markdown("Built with ❤️ using Streamlit & OpenAI")
+st.markdown("---"); st.markdown("Built with ❤️ using Streamlit & OpenAI")
