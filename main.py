@@ -12,7 +12,7 @@ import time
 import zipfile
 import traceback # For detailed error logging in console
 import sys
-from streamlit_image_comparison import image_comparison # <-- IMPORT FOR SLIDER
+from streamlit_image_comparison import image_comparison
 
 # --- Configuration & Page Setup ---
 st.set_page_config(layout="wide", page_title="Image SEO Optimizer")
