@@ -12,7 +12,12 @@ import time
 import zipfile
 import traceback
 import sys
-from streamlit_image_comparison import image_comparison # Still needed
+# Ensure streamlit-image-comparison is installed (added to requirements.txt)
+try:
+    from streamlit_image_comparison import image_comparison
+    image_comparison_available = True
+except ModuleNotFoundError:
+    image_comparison_available = False # Handle if not installed
 
 # --- Configuration & Page Setup ---
 st.set_page_config(layout="wide", page_title="Image SEO Optimizer")
@@ -60,6 +65,7 @@ def format_size(size_bytes):
 
 # --- Main App UI ---
 st.title("Image SEO Optimizer")
+st.write(f"Streamlit Version (for debugging): {st.__version__}") # Keep this!
 st.write("**Author:** Brandon Lazovic")
 st.markdown("""Optimize images for SEO: AI filenames/alt text, project numbers, WebP compression, zip download.""")
 
@@ -91,27 +97,21 @@ if uploaded_files: image_sources_input.extend(uploaded_files)
 if image_urls_input: urls = [url.strip() for url in image_urls_input.strip().split('\n') if url.strip()]; image_sources_input.extend(urls)
 
 total_images = len(image_sources_input)
-processed_data = []; skipped_files = []; processing_errors = []
+
+# Initialize Session State
+if 'processed_data' not in st.session_state: st.session_state.processed_data = []
+# Removed skipped/errors from state, handle directly
+if 'compare_index' not in st.session_state: st.session_state.compare_index = None
+
 
 if not api_key: st.warning("🚨 Enter OpenAI API key in sidebar.")
 elif not target_keyword: st.warning("🎯 Enter target keyword in sidebar.")
 elif not image_sources_input: st.info("➕ Upload images or provide URLs.")
 elif total_images > 20: st.error(f"❌ Max 20 images ({total_images} provided).")
 else:
-    # Initialize session state to store processed data IF NOT ALREADY PRESENT
-    if 'processed_data' not in st.session_state:
-        st.session_state.processed_data = []
-    if 'skipped_files' not in st.session_state:
-        st.session_state.skipped_files = []
-    if 'processing_errors' not in st.session_state:
-        st.session_state.processing_errors = []
-
-
     if st.button("✨ Optimize Images", type="primary"):
-        # Clear previous results from state on new run
-        st.session_state.processed_data = []
-        st.session_state.skipped_files = []
-        st.session_state.processing_errors = []
+        st.session_state.processed_data = [] # Clear previous results
+        st.session_state.compare_index = None # Reset comparison view
 
         if not target_keyword: st.error("❌ Target keyword cannot be empty."); st.stop()
 
@@ -120,20 +120,23 @@ else:
         progress_bar = st.progress(0, text="Initializing...")
         start_time = time.time(); optimized_filenames_set = set()
 
-        temp_processed_data = [] # Use a temporary list during processing
+        # Use lists to collect results and errors during processing
+        temp_processed_data = []
+        temp_skipped_files = []
+        temp_processing_errors = []
+
 
         for idx, source in enumerate(image_sources_input):
             progress_text = f"Processing image {idx + 1}/{total_images}..."; progress_bar.progress((idx + 1)/total_images, text=progress_text)
             image, original_filename, error, original_image_data = get_image_from_source(source)
             source_identifier = source if isinstance(source, str) else source.name
 
-            if error: st.session_state.skipped_files.append(f"{source_identifier} (Load Error)"); st.session_state.processing_errors.append(error); continue
+            if error: temp_skipped_files.append(f"{source_identifier} (Load Error)"); temp_processing_errors.append(error); continue
             if not image or not original_filename or original_image_data is None:
-                 st.session_state.skipped_files.append(f"{source_identifier} (Load Fail - Missing Data)")
-                 st.session_state.processing_errors.append(f"Failed load or missing data: {source_identifier}"); continue
+                 temp_skipped_files.append(f"{source_identifier} (Load Fail - Missing Data)")
+                 temp_processing_errors.append(f"Failed load or missing data: {source_identifier}"); continue
 
             try:
-                # --- Calculations ---
                 original_size_bytes = len(original_image_data) if original_image_data else 0
                 compressed_buffer = BytesIO()
                 image.save(compressed_buffer, format="WEBP", quality=compression_quality, lossless=False)
@@ -141,40 +144,61 @@ else:
                 compressed_size_bytes = len(compressed_image_data)
                 savings_percentage = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100 if original_size_bytes > 0 else 0.0
 
-                # --- OpenAI API Call ---
                 openai_image_buffer = BytesIO(); image.save(openai_image_buffer, format="PNG")
                 base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
-                sanitized_keyword_for_api = target_keyword # Basic sanitization could be re-added if needed
-                prompt_text_for_api = f"""Analyze...\nTarget Keyword: '{sanitized_keyword_for_api}'\nGuidelines...\nOutput JSON...""" # Use full prompt
-                final_sanitized_prompt_text = prompt_text_for_api # Add aggressive sanitize if needed
+
+                sanitized_keyword_for_api = target_keyword
+                # Add keyword sanitization back if needed for API encoding issues
+                # try: ... except ...
+
+                # --- Stricter Prompt for JSON ---
+                prompt_text_for_api = f"""
+Analyze the image for its most dominant and specific visual elements.
+Target Keyword for context: '{sanitized_keyword_for_api}'
+
+Your task is to generate ONLY a single, valid JSON object containing two keys: "base_filename" and "alt_text".
+- **base_filename:** A concise, descriptive name using 3-5 core keywords from the image. Separate EVERY word with a hyphen (-). Prioritize unique visual details. Example: `black-casement-window-living-room`. Do NOT include a file extension.
+- **alt_text:** A natural, descriptive sentence (< 125 chars). Include the target keyword naturally if relevant to the image. Describe key visual elements and context.
+
+**IMPORTANT: Output ONLY the JSON object below, with no other text, explanations, or markdown.**
+```json
+{{
+  "base_filename": "your-concise-hyphenated-base-name",
+  "alt_text": "Your descriptive alt text sentence."
+}}```
+"""
+                final_sanitized_prompt_text = prompt_text_for_api # Assume prompt encoding is ok now
 
                 messages = [{"role": "user", "content": [{"type": "text", "text": final_sanitized_prompt_text}, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}]}]
                 model_to_use = "gpt-4.1" # Or "gpt-4-turbo"
                 print(f"Console Log: Attempting API call img {idx+1} (Model: {model_to_use})")
+                base_filename_from_api = f"api-error-{idx+1}" # Default in case of complete failure
+                alt_text = f"Image related to {target_keyword} (API error)" # Default
+
                 try:
-                    response = client.chat.completions.create(model=model_to_use, messages=messages, max_tokens=150, temperature=0.2)
+                    response = client.chat.completions.create(model=model_to_use, messages=messages, max_tokens=200, temperature=0.2)
                     output = response.choices[0].message.content.strip()
-                    if output.startswith("```json"): output = output.strip("```json").strip("```").strip()
-                    elif output.startswith("```"): output = output.strip("```").strip()
+
+                    if output.startswith("```json"): output = output[len("```json"):].strip()
+                    if output.endswith("```"): output = output[:-len("```")].strip()
                     try:
                         result = json.loads(output)
                         base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
                         alt_text = result.get("alt_text", f"Image related to {target_keyword}")
                     except json.JSONDecodeError as json_e:
-                        st.warning(f"⚠️ OpenAI response format unexpected for image {idx+1}. Using defaults. (Error: {json_e})")
-                        print(f"Console: JSON Parse Err img {idx+1}. Raw output snippet: {output[:100]}...")
+                        st.warning(f"⚠️ OpenAI response format unexpected for image {idx+1}. Using defaults. (Check Console Log)")
+                        print(f"Console: JSON Parse Err img {idx+1}. Error: {json_e}. Raw output: '{output}'")
                         base_filename_from_api = f"api-parse-error-{idx+1}"
                         alt_text = f"Image related to {target_keyword} (API parse error)"
+                        temp_processing_errors.append(f"API JSON Parse Err {original_filename}: {json_e}") # Log specific parse error
+
                 except Exception as api_e:
                     error_detail = str(api_e)
-                    st.error(f"⚠️ OpenAI API error img {idx+1} ({original_filename}): {error_detail}. Defaults used.") # Simplified UI error
-                    base_filename_from_api = f"api-error-{idx+1}"
-                    alt_text = f"Image related to {target_keyword} (API error)"
-                    # Store detailed error for logs
-                    st.session_state.processing_errors.append(f"OpenAI API Err {original_filename}: {error_detail}")
+                    st.error(f"⚠️ OpenAI API error img {idx+1} ({original_filename}): {error_detail}. Defaults used.")
+                    # Use default base_filename/alt_text defined above
+                    temp_processing_errors.append(f"OpenAI API Err {original_filename}: {error_detail}") # Log API error
 
 
-                # --- Filename Construction ---
                 sanitized_base_name = sanitize_filename(base_filename_from_api)
                 filename_core = sanitized_base_name
                 if sanitized_project_number: filename_core += f"-{sanitized_project_number}"
@@ -188,144 +212,131 @@ else:
                     counter += 1
                 optimized_filenames_set.add(unique_filename)
 
-                # Append successful results to temporary list
                 temp_processed_data.append({
-                    "original_filename": original_filename, "optimized_filename": unique_filename,
+                    "status": "success", "original_filename": original_filename, "optimized_filename": unique_filename,
                     "alt_text": alt_text, "original_size_bytes": original_size_bytes,
                     "compressed_size_bytes": compressed_size_bytes, "savings_percentage": savings_percentage,
                     "image_url": source if isinstance(source, str) else None,
-                    "compressed_data": compressed_image_data,
-                    # Store original bytes too, needed for dialog comparison
-                    "original_data": original_image_data,
-                    # We don't strictly need the PIL object in state if we have bytes
-                    # "pil_image": image
+                    "compressed_data": compressed_image_data, "original_data": original_image_data,
                 })
             except Exception as process_e:
-                 st.session_state.skipped_files.append(f"{source_identifier} (Processing Error)")
-                 st.session_state.processing_errors.append(f"Error processing {original_filename}: {process_e}")
-                 print(f"--- Error processing {original_filename} ---"); traceback.print_exc(); print("--- End Error ---"); continue
+                 temp_skipped_files.append(f"{source_identifier} (Processing Error)")
+                 temp_processing_errors.append(f"Error processing {original_filename if 'original_filename' in locals() else source_identifier}: {process_e}")
+                 print(f"--- Error processing {source_identifier} ---"); traceback.print_exc(); print("--- End Error ---"); continue
             time.sleep(0.7)
 
         progress_bar.empty(); end_time = time.time()
-        st.success(f"✅ Optimization done: {len(temp_processed_data)}/{total_images} images in {end_time - start_time:.2f}s!")
-
-        # Store the results in session state AFTER the loop finishes
+        # Store results in session state AFTER loop
         st.session_state.processed_data = temp_processed_data
-        # Force a rerun to update the display with session state data
-        st.rerun()
+        # We don't need skipped/errors in session state if we display them directly
+        # st.session_state.skipped_files = temp_skipped_files
+        # st.session_state.processing_errors = temp_processing_errors
+
+        st.success(f"✅ Optimization complete: {len(temp_processed_data)} items processed in {end_time - start_time:.2f}s!")
+
+        # Display skipped/errors immediately after processing
+        if temp_skipped_files:
+            st.header("⚠️ Skipped / Processing Errors")
+            for i, file_info in enumerate(temp_skipped_files):
+                st.warning(f"- {file_info}")
+                if i < len(temp_processing_errors): st.error(f"  Details: {temp_processing_errors[i]}", icon="🐛")
+
+        st.rerun() # Rerun to display results from session state
 
 
 # --- Results Display Section (Reads from Session State) ---
-if st.session_state.get('processed_data'): # Check if processed data exists in state
-    processed_data_display = st.session_state.processed_data
-    st.header("📊 Results & Downloads")
-    display_df_data = [{"Original Filename": item["original_filename"], "Optimized Filename": item["optimized_filename"],
-                        "Alt Text": item["alt_text"], "Original Size": format_size(item["original_size_bytes"]),
-                        "Compressed Size": format_size(item["compressed_size_bytes"]),
-                        "Savings (%)": f"{item['savings_percentage']:.1f}%" if item.get('original_size_bytes', 0) > 0 else "N/A",
-                        "Original Source": item["image_url"] if item["image_url"] else "Uploaded"} for item in processed_data_display]
-    if display_df_data: st.dataframe(pd.DataFrame(display_df_data))
-    else: st.info("No data for table.")
+if st.session_state.processed_data:
+    processed_data_display = [item for item in st.session_state.processed_data if item.get('status') == 'success']
+    # Error display moved to after processing run
 
-    col_dl1, col_dl2 = st.columns(2)
-    with col_dl1: # CSV Download
-        if display_df_data: csv = pd.DataFrame(display_df_data).to_csv(index=False).encode('utf-8'); st.download_button("📥 CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
-    with col_dl2: # ZIP Download
-        if processed_data_display:
-            zip_buffer = BytesIO()
-            with zipfile.ZipFile(zip_buffer,'w',zipfile.ZIP_DEFLATED) as zf:
-                for item in processed_data_display: zf.writestr(item["optimized_filename"], item["compressed_data"])
-            st.download_button("📦 Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_download')
-
-    # --- Modified Image Preview Section (Uses Dialog) ---
-    st.header("🖼️ Optimized Image Details")
     if processed_data_display:
+        st.header("📊 Results & Downloads")
+        display_df_data = [{"Original Filename": item["original_filename"], "Optimized Filename": item["optimized_filename"],
+                            "Alt Text": item["alt_text"], "Original Size": format_size(item["original_size_bytes"]),
+                            "Compressed Size": format_size(item["compressed_size_bytes"]),
+                            "Savings (%)": f"{item['savings_percentage']:.1f}%" if item.get('original_size_bytes', 0) > 0 else "N/A",
+                            "Original Source": item["image_url"] if item["image_url"] else "Uploaded"} for item in processed_data_display]
+        if display_df_data: st.dataframe(pd.DataFrame(display_df_data))
+        else: st.info("No successful results to display in table.")
+
+        col_dl1, col_dl2 = st.columns(2)
+        with col_dl1: # CSV Download
+            if display_df_data: csv = pd.DataFrame(display_df_data).to_csv(index=False).encode('utf-8'); st.download_button("📥 CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
+        with col_dl2: # ZIP Download
+            if processed_data_display:
+                zip_buffer = BytesIO()
+                with zipfile.ZipFile(zip_buffer,'w',zipfile.ZIP_DEFLATED) as zf:
+                    for item in processed_data_display: zf.writestr(item["optimized_filename"], item["compressed_data"])
+                st.download_button("📦 Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_download')
+
+        st.header("🖼️ Optimized Image Details")
         for i_disp, item in enumerate(processed_data_display):
             with st.expander(f"Image {i_disp+1}: {item.get('optimized_filename', 'N/A')}", expanded=False):
-
-                # --- Display Text Info & Static Preview ---
                 st.markdown(f"**Optimized Filename:** `{item.get('optimized_filename', 'N/A')}`")
                 original_fsize = format_size(item.get("original_size_bytes"))
                 compressed_fsize = format_size(item.get("compressed_size_bytes"))
                 savings_fpercent = f"{item.get('savings_percentage', 0.0):.1f}%" if item.get('original_size_bytes', 0) > 0 else "N/A"
                 st.markdown(f"**Size:** {original_fsize} -> {compressed_fsize} (**Savings: {savings_fpercent}**)")
-                st.markdown(f"**Alt Text:**"); st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{i_disp}", disabled=True)
+                st.markdown(f"**Alt Text:**"); st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{i_disp}_{item['original_filename']}", disabled=True)
 
-                # Display static compressed image preview
                 if 'compressed_data' in item and item['compressed_data']:
-                    st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview", width=250) # Smaller static preview
-                else:
-                    st.caption("Compressed preview not available.")
-
+                    st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview", width=250)
                 st.markdown("---")
-
-                # --- Button to Open Comparison Dialog ---
-                compare_key = f"compare_btn_{i_disp}"
-                if st.button("Compare Original vs. Compressed", key=compare_key):
-                    # We store the index of the item to compare in session state
-                    st.session_state.compare_index = i_disp
-
-    else:
-        st.info("No images processed to display details.")
-    # --- End Modified Image Preview Section ---
+                compare_key = f"compare_btn_{i_disp}_{item['original_filename']}"
+                # Only show compare button if component is available and data exists
+                if image_comparison_available and 'original_data' in item and item['original_data'] and 'compressed_data' in item and item['compressed_data']:
+                    if st.button("Compare Original vs. Compressed", key=compare_key):
+                        st.session_state.compare_index = i_disp
+                        st.rerun() # Rerun to show the comparison container
+                elif not image_comparison_available:
+                     st.caption("Comparison slider requires 'streamlit-image-comparison' library.")
 
 
-# --- Logic to display the Dialog ---
-if 'compare_index' in st.session_state and st.session_state.compare_index is not None:
-    idx_to_compare = st.session_state.compare_index
-    if idx_to_compare < len(st.session_state.processed_data):
-        item_to_compare = st.session_state.processed_data[idx_to_compare]
+    # --- Comparison Container Logic (Alternative to st.dialog) ---
+    if st.session_state.get('compare_index') is not None:
+        idx_to_compare = st.session_state.compare_index
+        successful_processed_data = [item for item in st.session_state.processed_data if item.get('status') == 'success']
 
-        # Check if necessary data exists
-        if 'original_data' in item_to_compare and item_to_compare['original_data'] and \
-           'compressed_data' in item_to_compare and item_to_compare['compressed_data']:
+        if 0 <= idx_to_compare < len(successful_processed_data):
+            item_to_compare = successful_processed_data[idx_to_compare]
 
-            @st.dialog("Image Comparison") # Use st.dialog decorator
-            def show_comparison_dialog():
-                st.write(f"Comparing: **{item_to_compare.get('original_filename', 'Original Image')}**")
-                try:
-                    # Load images from bytes for the slider inside the dialog
-                    original_img_dialog = Image.open(BytesIO(item_to_compare["original_data"]))
-                    compressed_img_dialog = Image.open(BytesIO(item_to_compare["compressed_data"]))
+            # Create a container to hold the comparison view
+            with st.container(border=True): # Added border for visibility
+                 st.subheader(f"Comparing: {item_to_compare.get('original_filename', 'Original Image')}")
+                 try:
+                    original_img_compare = Image.open(BytesIO(item_to_compare["original_data"]))
+                    compressed_img_compare = Image.open(BytesIO(item_to_compare["compressed_data"]))
 
-                    image_comparison(
-                        img1=original_img_dialog,
-                        img2=compressed_img_dialog,
-                        label1="Original",
-                        label2=f"WebP Q{compression_quality}", # Get quality from current slider value
-                        width=700, # Explicit width usually works better in dialog
-                        starting_position=50,
-                        show_labels=True,
-                        make_responsive=True,
-                        in_memory=True
-                    )
-                    if st.button("Close", key=f"close_dialog_{idx_to_compare}"):
+                    if image_comparison_available:
+                        image_comparison(
+                            img1=original_img_compare,
+                            img2=compressed_img_compare,
+                            label1="Original",
+                            label2=f"WebP Q{compression_quality}",
+                            width=700, # Explicit width might work better here than in expander
+                            starting_position=50,
+                            show_labels=True,
+                            make_responsive=True,
+                            in_memory=True
+                        )
+                    else:
+                        # Fallback if component not installed
+                        col1_comp, col2_comp = st.columns(2)
+                        with col1_comp: st.image(original_img_compare, caption="Original")
+                        with col2_comp: st.image(compressed_img_compare, caption=f"WebP Q{compression_quality}")
+
+                    if st.button("Close Comparison", key=f"close_compare_{idx_to_compare}"):
                         st.session_state.compare_index = None # Reset the index
-                        st.rerun() # Rerun to close the dialog
-                except Exception as dialog_err:
-                    st.error(f"Could not load images for comparison: {dialog_err}")
-                    if st.button("Close", key=f"close_err_dialog_{idx_to_compare}"):
-                         st.session_state.compare_index = None
-                         st.rerun()
+                        st.rerun() # Rerun to hide the container
 
-            # Call the dialog function
-            show_comparison_dialog()
-
+                 except Exception as compare_err:
+                     st.error(f"Could not load images for comparison: {compare_err}")
+                     if st.button("Close Error", key=f"close_err_compare_{idx_to_compare}"):
+                          st.session_state.compare_index = None
+                          st.rerun()
         else:
-             st.warning("Cannot compare - original or compressed image data is missing.")
-             # Reset compare_index if data is bad
-             st.session_state.compare_index = None
-    else:
-         # Index out of bounds, reset
-         st.session_state.compare_index = None
+             print(f"Error: compare_index {idx_to_compare} out of bounds for successful data.")
+             st.session_state.compare_index = None # Reset invalid index
 
-# --- Display Skipped/Errored Files (reads from Session State) ---
-if st.session_state.get('skipped_files'):
-    st.header("⚠️ Skipped / Errored Items")
-    skipped_files_display = st.session_state.skipped_files
-    processing_errors_display = st.session_state.processing_errors
-    for i, file_info in enumerate(skipped_files_display):
-        st.warning(f"- {file_info}")
-        if i < len(processing_errors_display): st.error(f"  Details: {processing_errors_display[i]}", icon="🐛")
 
 st.markdown("---"); st.markdown("Built with ❤️ using Streamlit & OpenAI")
