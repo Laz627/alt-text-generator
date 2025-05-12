@@ -264,10 +264,10 @@ Output ONLY in this exact JSON format (no extra text or markdown):
                                     img2=compressed_pil_image,
                                     label1="Original",
                                     label2=f"WebP Q{compression_quality}",
-                                    # width=600, # Relying on responsive width
+                                    width=700, # <-- RE-ADDED explicit width (adjust as needed)
                                     starting_position=50,
                                     show_labels=True,
-                                    make_responsive=True,
+                                    make_responsive=True, # Keep responsive for potential adjustments
                                     in_memory=True
                                 )
                             except Exception as img_load_err:
