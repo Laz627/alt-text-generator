@@ -158,19 +158,16 @@ else:
                 # --- START Keyword Sanitization for API ---
                 sanitized_keyword_for_api = target_keyword
                 try:
-                    # Attempt to encode to ASCII, ignoring errors, then decode back.
-                    # This removes non-ASCII characters.
                     ascii_encoded_keyword = target_keyword.encode('ascii', 'ignore')
                     sanitized_keyword_for_api = ascii_encoded_keyword.decode('ascii')
                     if sanitized_keyword_for_api != target_keyword:
-                        # Log to console if changes were made. Avoid flooding UI with warnings.
                         print(f"Console Log: Target keyword '{target_keyword}' sanitized to '{sanitized_keyword_for_api}' for API call for image {idx+1} ({original_filename}) due to non-ASCII characters.")
                 except Exception as e:
-                    # Fallback to original if sanitization itself causes an unexpected error
                     print(f"Console Log: Error during keyword sanitization for API: {e}. Using original keyword: '{target_keyword}'")
                     sanitized_keyword_for_api = target_keyword # Fallback
                 # --- END Keyword Sanitization for API ---
 
+                # Define the prompt using the sanitized keyword
                 prompt = f"""
 Analyze the image and generate an SEO-optimized file name (without extension initially) and alt text.
 Target Keyword: '{sanitized_keyword_for_api}'
@@ -185,17 +182,24 @@ Output ONLY in this exact JSON format:
   "alt_text": "Your optimized alt text."
 }}
 """
+                # *** ADD THIS DEBUG PRINT STATEMENT ***
+                print(f"\n--- DEBUG: Prompt being sent for image {idx+1} ({original_filename}) ---")
+                print(prompt)
+                print("--- END DEBUG Prompt ---\n")
+                # *** END DEBUG PRINT STATEMENT ***
+
                 messages = [
                     {"role": "user", "content": [
-                        {"type": "text", "text": prompt},
+                        {"type": "text", "text": prompt}, # Ensure 'prompt' variable is used here
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
                     ]}
                 ]
 
                 try:
+                    # Make the API call
                     response = client.chat.completions.create(
                         model="gpt-4o-mini",
-                        messages=messages,
+                        messages=messages, # Ensure 'messages' variable is used here
                         max_tokens=150,
                         temperature=0.1,
                         response_format={"type": "json_object"}
