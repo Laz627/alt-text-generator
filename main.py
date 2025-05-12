@@ -11,7 +11,7 @@ import json
 import time
 import zipfile
 import traceback # For detailed error logging in console
-import sys # Added to check encoding
+import sys
 
 # --- Configuration & Page Setup ---
 st.set_page_config(layout="wide", page_title="Image SEO Optimizer")
@@ -19,13 +19,13 @@ st.set_page_config(layout="wide", page_title="Image SEO Optimizer")
 # --- Helper Functions ---
 def sanitize_filename(filename):
     """Removes invalid characters, replaces spaces with hyphens, ensures single hyphens."""
-    sanitized = filename.lower().replace(' ', '-') # Replace spaces first
-    sanitized = re.sub(r'[^a-z0-9\-]', '', sanitized) # Allow only lowercase letters, numbers, hyphens
-    sanitized = re.sub(r'-+', '-', sanitized) # Replace multiple hyphens with one
-    sanitized = sanitized.strip('-') # Remove leading/trailing hyphens
+    sanitized = filename.lower().replace(' ', '-')
+    sanitized = re.sub(r'[^a-z0-9\-]', '', sanitized)
+    sanitized = re.sub(r'-+', '-', sanitized)
+    sanitized = sanitized.strip('-')
     return sanitized
 
-def truncate_filename(filename, max_length=100):
+def truncate_filename(filename, max_length=80): # Shortened max_length for filenames
     """Truncates filename if it exceeds max_length, preserving the extension."""
     if len(filename) <= max_length: return filename
     base_name, extension = os.path.splitext(filename)
@@ -54,23 +54,22 @@ def get_image_from_source(source):
 
 # --- Main App UI ---
 st.title("Image SEO Optimizer")
-st.write(f"**Debug Info:** Python Default Encoding: `{sys.getdefaultencoding()}`, Filesystem Encoding: `{sys.getfilesystemencoding()}`")
+# st.write(f"**Debug Info:** Python Default Encoding: `{sys.getdefaultencoding()}`, Filesystem Encoding: `{sys.getfilesystemencoding()}`") # Can be commented out after checking
 st.write("**Author:** Brandon Lazovic")
-st.markdown("""Welcome! Optimize images for SEO: AI filenames/alt text, project numbers, compression, zip download.""")
+st.markdown("""Optimize images for SEO: AI filenames/alt text, project numbers, WebP compression, zip download.""")
 
 with st.expander("SEO Best Practices for Images"):
-    st.markdown("""- **Alt Text:** Concise, descriptive, keyword-rich (naturally), context-relevant, < 125 chars. Accessibility/Search.
-- **File Names:** Short, descriptive, hyphen-separated, keyword-rich (naturally). Avoid generic names. Use standard types.
-- **Compression:** Balance quality/size (JPEG photos, PNG graphics). Faster loads.
-- **Context:** Place near relevant text. Use captions.
-- **Responsiveness:** `srcset` / `<picture>` for sizes.
-- **Structured Data:** Schema markup (`ImageObject`) for rich results.""")
+    st.markdown("""- **Alt Text:** Concise, descriptive, keyword-rich, context-relevant, < 125 chars.
+- **File Names:** Short, descriptive, hyphen-separated, keyword-rich. Use `.webp`, `.jpg`, `.png`.
+- **Compression:** Balance quality/size. WebP often best for web.
+- **Context & Responsiveness:** Place near relevant text, use `srcset`.""")
 
 st.sidebar.header("⚙️ Configuration")
 api_key = st.sidebar.text_input("1. OpenAI API Key", type="password", help="Required for AI generation.")
 target_keyword = st.sidebar.text_input("2. Target Keyword", help="Primary keyword for optimization.")
-project_number = st.sidebar.text_input("3. Project Number (Optional)", help="Appended to filenames (e.g., image-slug-PN123.jpg).")
-compression_quality = st.sidebar.slider("4. Compression Quality (JPEG Output)", 1, 100, 85, help="Adjust JPEG quality (higher = larger file).")
+project_number = st.sidebar.text_input("3. Project Number (Optional)", help="Appended to filenames (e.g., image-slug-PN123.webp).")
+# --- Changed Slider to WEBP Quality ---
+compression_quality = st.sidebar.slider("4. WebP Compression Quality", 1, 100, 80, help="Adjust WebP quality (0-100). Higher = better quality, larger file.")
 
 sanitized_project_number = ""
 if project_number:
@@ -113,57 +112,59 @@ else:
 
             try:
                 original_size_bytes = len(original_image_data)
-                compressed_buffer = BytesIO(); img_for_compression = image.copy()
-                if img_for_compression.mode in ('RGBA', 'LA', 'P'): img_for_compression = img_for_compression.convert('RGB')
-                img_for_compression.save(compressed_buffer, format="JPEG", quality=compression_quality, optimize=True); compressed_image_data = compressed_buffer.getvalue()
+                compressed_buffer = BytesIO()
+                # --- *** CONVERTING TO WEBP *** ---
+                # For WebP, Pillow can handle RGBA directly, which is good for images with transparency.
+                # If the image doesn't have alpha, it will save as RGB WebP.
+                # The `lossless=False` makes it lossy WebP (like JPEG), controlled by `quality`.
+                # For lossless WebP, set `lossless=True` and quality is then about effort.
+                image.save(compressed_buffer, format="WEBP", quality=compression_quality, lossless=False)
+                compressed_image_data = compressed_buffer.getvalue()
+                # --- End WebP Conversion ---
                 compressed_size_bytes = len(compressed_image_data)
                 savings_percentage = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100 if original_size_bytes > 0 else 0.0
 
-                openai_image_buffer = BytesIO(); image.save(openai_image_buffer, format="PNG")
+                openai_image_buffer = BytesIO(); image.save(openai_image_buffer, format="PNG") # Send PNG for analysis
                 base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
 
                 sanitized_keyword_for_api = target_keyword
-                try: # Keyword sanitization for API safety
+                try:
                     if isinstance(target_keyword, str):
                         ascii_encoded_keyword = target_keyword.encode('ascii', 'ignore'); sanitized_keyword_for_api = ascii_encoded_keyword.decode('ascii')
-                        if sanitized_keyword_for_api != target_keyword: print(f"Console: Keyword '{target_keyword}' sanitized to '{sanitized_keyword_for_api}' for API img {idx+1}.")
-                    else: print(f"Console: Warn - target_keyword not string img {idx+1}."); sanitized_keyword_for_api = str(target_keyword)
-                except Exception as e: print(f"Console: Keyword sanitize err: {e}. Using original: '{target_keyword}'")
+                        if sanitized_keyword_for_api != target_keyword: print(f"Console: Keyword sanitized for API img {idx+1}.")
+                    else: sanitized_keyword_for_api = str(target_keyword)
+                except Exception as e: print(f"Console: Keyword sanitize err: {e}.")
 
+                # --- *** UPDATED PROMPT FOR MORE CONCISE FILENAMES *** ---
                 prompt_text_for_api = f"""
-Analyze the image focusing on its most specific and unique visual elements. Generate an SEO-optimized, **highly descriptive** file name (without extension) and alt text.
+Analyze the image for its most dominant and specific visual elements. Generate an SEO-optimized file name (NO extension) and alt text.
 Target Keyword: '{sanitized_keyword_for_api}'
 
 Guidelines:
-- **Filename:** Create a **unique and descriptive name** using 4-7 relevant keywords/concepts from the image. **MUST separate EVERY word with a hyphen (-).** Focus on specific objects, colors, setting, actions, style (e.g., `modern-kitchen-black-casement-windows-marble-island`, `close-up-hand-opening-white-fiberglass-window`). **Avoid generic terms if specific details are available.** Do NOT include the file extension.
-- **Alt Text:** Natural, descriptive sentence (< 125 chars). Include target keyword naturally. Describe key elements, context, and **what makes the image distinct**.
+- **Filename:** Create a **concise and descriptive name** using 3-5 core keywords/concepts from the image. **MUST separate EVERY word with a hyphen (-).** Prioritize the most unique visual details. Example: `black-casement-window-living-room`, `hand-opening-fiberglass-window`. Do NOT include a file extension.
+- **Alt Text:** Natural, descriptive sentence (< 125 chars). Include target keyword naturally. Describe key elements and context.
 
 Output ONLY in this exact JSON format (no extra text or markdown):
 {{
-  "base_filename": "your-unique-descriptive-hyphenated-base-file-name",
-  "alt_text": "Your specific and descriptive alt text sentence."
+  "base_filename": "your-concise-hyphenated-base-name",
+  "alt_text": "Your descriptive alt text sentence."
 }}
 """
+                # --- End Updated Prompt ---
+
                 final_sanitized_prompt_text = prompt_text_for_api
-                try: # Aggressive sanitization of full prompt
+                try:
                     encoded_prompt = prompt_text_for_api.encode('ascii', 'ignore'); final_sanitized_prompt_text = encoded_prompt.decode('ascii')
                     if final_sanitized_prompt_text != prompt_text_for_api: print(f"Console: Full prompt sanitized for API img {idx+1}.")
                 except Exception as e_prompt_sanitize: print(f"Console: Full prompt sanitize err: {e_prompt_sanitize}.")
 
                 messages = [{"role": "user", "content": [{"type": "text", "text": final_sanitized_prompt_text}, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}]}]
 
-                # --- *** ATTEMPTING API CALL WITH gpt-4.1 *** ---
-                model_to_use = "gpt-4.1" # Using the identifier you provided
-                print(f"Console Log: Attempting API call img {idx+1} (Model: {model_to_use}) w/o response_format.")
-                # --- End Model Change Info ---
+                model_to_use = "gpt-4.1" # Or "gpt-4-turbo" if gpt-4.1 causes issues
+                print(f"Console Log: Attempting API call img {idx+1} (Model: {model_to_use})")
                 try:
-                    response = client.chat.completions.create(
-                        model=model_to_use, # Using the variable here
-                        messages=messages,
-                        max_tokens=150,
-                        temperature=0.2
-                    )
-                    output = response.choices[0].message.content.strip() # Corrected access
+                    response = client.chat.completions.create(model=model_to_use, messages=messages, max_tokens=150, temperature=0.2)
+                    output = response.choices[0].message.content.strip()
 
                     if output.startswith("```json"): output = output.strip("```json").strip("```").strip()
                     elif output.startswith("```"): output = output.strip("```").strip()
@@ -177,37 +178,29 @@ Output ONLY in this exact JSON format (no extra text or markdown):
                         processing_errors.append(f"API JSON Parse Err {original_filename}: {json_e}")
                         base_filename_from_api = f"api-parse-error-{idx+1}"
                         alt_text = f"Image related to {target_keyword} (API parse error)"
-
                 except Exception as api_e:
                     error_detail = str(api_e)
-                    # Check if it's an invalid model error specifically
                     if "invalid_request_error" in error_detail.lower() and "model does not exist" in error_detail.lower():
-                         st.error(f"❌ OpenAI API error: Model '{model_to_use}' not found or not accessible with your API key. Try using 'gpt-4-turbo' instead.")
+                         st.error(f"❌ OpenAI API error: Model '{model_to_use}' not found. Try 'gpt-4-turbo'.")
                          processing_errors.append(f"OpenAI API Err {original_filename}: Invalid Model '{model_to_use}'")
-                         # Optionally, stop the whole process if the model fails on the first try:
-                         # if idx == 0: st.stop()
-                    elif isinstance(api_e, UnicodeEncodeError):
-                         error_detail += (f" Still getting UnicodeEncodeError! Check environment encoding.")
-                    # Handle other errors
-                    else:
-                         st.error(f"⚠️ OpenAI API error img {idx+1} ({original_filename}): {error_detail}. Defaults used.")
-                         processing_errors.append(f"OpenAI API Err {original_filename}: {error_detail}")
-
-                    # Fallback values on ANY API error
+                    elif isinstance(api_e, UnicodeEncodeError): error_detail += (f" Still getting UnicodeEncodeError!")
+                    else: st.error(f"⚠️ OpenAI API error img {idx+1} ({original_filename}): {error_detail}. Defaults used.")
+                    if not ("invalid_request_error" in error_detail.lower() and "model does not exist" in error_detail.lower()):
+                        processing_errors.append(f"OpenAI API Err {original_filename}: {error_detail}") # Avoid double logging for invalid model
                     base_filename_from_api = f"api-error-{idx+1}"
                     alt_text = f"Image related to {target_keyword} (API error)"
-
 
                 sanitized_base_name = sanitize_filename(base_filename_from_api)
                 filename_core = sanitized_base_name
                 if sanitized_project_number: filename_core += f"-{sanitized_project_number}"
-                final_filename_with_ext = f"{filename_core}.jpg"
+                # --- *** FILENAME EXTENSION CHANGED TO .webp *** ---
+                final_filename_with_ext = f"{filename_core}.webp"
 
                 final_filename_with_ext = truncate_filename(final_filename_with_ext)
                 unique_filename = final_filename_with_ext; counter = 1
                 while unique_filename in optimized_filenames_set:
                     core_name_no_ext = filename_core
-                    unique_filename = f"{core_name_no_ext}-{counter}.jpg"; counter += 1
+                    unique_filename = f"{core_name_no_ext}-{counter}.webp"; counter += 1 # Use .webp here too
                 optimized_filenames_set.add(unique_filename)
 
                 processed_data.append({
@@ -220,7 +213,6 @@ Output ONLY in this exact JSON format (no extra text or markdown):
             except Exception as process_e:
                  skipped_files.append(f"{source_identifier} (Processing Error)"); processing_errors.append(f"Error processing {original_filename}: {process_e}")
                  print(f"--- Error processing {original_filename} ---"); traceback.print_exc(); print("--- End Error ---"); continue
-            # Slightly longer delay might help if hitting rate limits with GPT-4 Turbo/4.1
             time.sleep(0.7)
 
         progress_bar.empty(); end_time = time.time()
@@ -234,11 +226,14 @@ Output ONLY in this exact JSON format (no extra text or markdown):
                 if size_kb < 1024: return f"{size_kb:.1f} KB"
                 size_mb = size_kb / 1024; return f"{size_mb:.1f} MB"
 
-            display_df_data = [{"Original Filename": i["original_filename"], "Optimized Filename": i["optimized_filename"],
-                                "Alt Text": i["alt_text"], "Original Size": format_size(i["original_size_bytes"]),
-                                "Compressed Size": format_size(i["compressed_size_bytes"]),
-                                "Savings (%)": f"{i['savings_percentage']:.1f}%" if i['original_size_bytes'] > 0 else "N/A",
-                                "Original Source": i["image_url"] if i["image_url"] else "Uploaded"} for i in processed_data]
+            # --- Corrected List Comprehension for display_df_data ---
+            display_df_data = [{"Original Filename": item["original_filename"], "Optimized Filename": item["optimized_filename"],
+                                "Alt Text": item["alt_text"], "Original Size": format_size(item["original_size_bytes"]),
+                                "Compressed Size": format_size(item["compressed_size_bytes"]),
+                                "Savings (%)": f"{item['savings_percentage']:.1f}%" if item['original_size_bytes'] > 0 else "N/A",
+                                "Original Source": item["image_url"] if item["image_url"] else "Uploaded"} for item in processed_data] # Changed 'i' to 'item'
+            # --- End Correction ---
+
             if display_df_data: st.dataframe(pd.DataFrame(display_df_data))
             else: st.info("No data for table.")
 
@@ -253,13 +248,13 @@ Output ONLY in this exact JSON format (no extra text or markdown):
 
             st.header("🖼️ Optimized Image Preview")
             if processed_data:
-                for i_disp, item in enumerate(processed_data):
+                for i_disp, item in enumerate(processed_data): # Changed 'idx_disp' to 'i_disp' for consistency
                     with st.expander(f"Image {i_disp+1}: {item.get('optimized_filename', 'N/A')}", expanded=False):
                         if 'pil_image' in item:
                             st.image(item["pil_image"], caption=f"Optimized: {item.get('optimized_filename', 'N/A')}", width=300)
                             original_fsize = format_size(item["original_size_bytes"])
                             compressed_fsize = format_size(item["compressed_size_bytes"])
-                            savings_fpercent = f"{item['savings_percentage']:.1f}%" if i['original_size_bytes'] > 0 else "N/A"
+                            savings_fpercent = f"{item['savings_percentage']:.1f}%" if item['original_size_bytes'] > 0 else "N/A"
                             st.markdown(f"**Size:** {original_fsize} -> {compressed_fsize} (**Savings: {savings_fpercent}**)")
                         else: st.warning("No preview.")
                         st.markdown(f"**Alt Text:**"); st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{i_disp}", disabled=True)
@@ -267,7 +262,7 @@ Output ONLY in this exact JSON format (no extra text or markdown):
 
         if skipped_files:
             st.header("⚠️ Skipped / Errored Items")
-            for i, file_info in enumerate(skipped_files):
+            for i, file_info in enumerate(skipped_files): # 'i' is fine here as it's a new loop index
                 st.warning(f"- {file_info}")
                 if i < len(processing_errors): st.error(f"  Details: {processing_errors[i]}", icon="🐛")
 
