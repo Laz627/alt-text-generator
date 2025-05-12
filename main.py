@@ -9,7 +9,8 @@ from PIL import Image
 from openai import OpenAI
 import json
 import time
-import zipfile # Added for zip functionality
+import zipfile
+import traceback # For detailed error logging in console
 
 # --- Configuration & Page Setup ---
 st.set_page_config(layout="wide", page_title="Image SEO Optimizer")
@@ -17,11 +18,8 @@ st.set_page_config(layout="wide", page_title="Image SEO Optimizer")
 # --- Helper Functions ---
 def sanitize_filename(filename):
     """Removes invalid characters and replaces spaces with hyphens."""
-    # Remove invalid characters (allow letters, numbers, hyphens, periods)
     sanitized = re.sub(r'[^a-zA-Z0-9\-\.]', '', filename.replace(' ', '-').lower())
-    # Remove leading/trailing hyphens and periods
     sanitized = sanitized.strip('-.')
-    # Replace multiple hyphens with a single hyphen
     sanitized = re.sub(r'-+', '-', sanitized)
     return sanitized
 
@@ -30,10 +28,8 @@ def truncate_filename(filename, max_length=100):
     if len(filename) <= max_length:
         return filename
     base_name, extension = os.path.splitext(filename)
-    # Calculate how much of the base name we can keep
     available_length = max_length - len(extension)
     truncated_base = base_name[:available_length]
-    # Ensure it doesn't end with a hyphen after truncation
     truncated_base = truncated_base.rstrip('-')
     return f"{truncated_base}{extension}"
 
@@ -46,15 +42,13 @@ def get_image_from_source(source):
 
     try:
         if is_url:
-            # Process URL
-            response = requests.get(source, timeout=15) # Added timeout
-            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+            response = requests.get(source, timeout=15)
+            response.raise_for_status()
             if 'image' not in response.headers.get('Content-Type', '').lower():
                 raise ValueError("URL does not point to a valid image type.")
             image = Image.open(BytesIO(response.content))
-            original_filename = source.split('/')[-1].split('?')[0] # Basic filename extraction
+            original_filename = source.split('/')[-1].split('?')[0]
         else:
-            # Process Uploaded File
             if source.type not in ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/bmp', 'image/avif']:
                  raise ValueError(f"Unsupported file format: {source.type}")
             image = Image.open(source)
@@ -65,9 +59,7 @@ def get_image_from_source(source):
         error = f"Error processing {'URL' if is_url else 'file'} {source if is_url else source.name}: {e}"
     except Exception as e:
         error = f"Unexpected error processing {'URL' if is_url else 'file'} {source if is_url else source.name}: {e}"
-
     return image, original_filename, error
-
 
 # --- Main App UI ---
 st.title("🚀 Image SEO Optimizer")
@@ -82,12 +74,11 @@ Welcome to the **Image SEO Optimizer**! This tool enhances your images for SEO b
 Upload images or provide URLs, set your parameters, and optimize!
 """)
 
-# Collapsible SEO Best Practices
 with st.expander("💡 ricorda: SEO Best Practices for Images"):
     st.markdown("""
     - **Alt Text:** Concise, descriptive, keyword-rich (naturally), contextually relevant. Aim for under 125 characters. Crucial for accessibility and search engines.
     - **File Names:** Short, descriptive, hyphen-separated words, keyword-rich (naturally). Avoid generic names (`IMG001.jpg`). Use `.jpg`, `.png`, `.webp`, `.gif`, `.svg`, etc.
-    - **Compression:** Balance quality and file size for faster loading. Use tools or save-for-web options. JPEGs are great for photos, PNGs for graphics with transparency.
+    - **Compression:** Balance quality and file size for faster loading. JPEGs are great for photos, PNGs for graphics with transparency.
     - **Context:** Place images near relevant text. Use captions if helpful.
     - **Responsiveness:** Use `srcset` or `<picture>` for different screen sizes.
     - **Structured Data:** Use schema markup (e.g., `ImageObject`) for eligibility in rich results.
@@ -99,7 +90,6 @@ target_keyword = st.sidebar.text_input("2. Target Keyword", help="Primary keywor
 project_number = st.sidebar.text_input("3. Project Number (Optional)", help="Appended to filenames (e.g., 'image-slug-PN123.jpg'). Alphanumeric and hyphens allowed.")
 compression_quality = st.sidebar.slider("4. Compression Quality (JPEG Output)", 1, 100, 85, help="Adjust the quality (and file size) of the output JPEG images. Higher quality means larger files.")
 
-# Sanitize project number input
 sanitized_project_number = ""
 if project_number:
     sanitized_project_number = re.sub(r'[^a-zA-Z0-9\-]', '', project_number).strip('-')
@@ -108,109 +98,82 @@ if project_number:
     if not sanitized_project_number:
         st.sidebar.warning("Invalid project number entered after sanitization, it will not be used.")
 
-
-st.header("🖼️ Image Input (Max 50)")
+st.header("🖼️ Image Input (Max 20)")
 col1, col2 = st.columns(2)
-
 with col1:
-    uploaded_files = st.file_uploader(
-        "Upload Images",
-        type=['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif'], # Added more types
-        accept_multiple_files=True,
-        help="You can upload up to 50 images."
-    )
-
+    uploaded_files = st.file_uploader("Upload Images", type=['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif'], accept_multiple_files=True, help="You can upload up to 20 images.")
 with col2:
-    image_urls_input = st.text_area(
-        "Or Enter Image URLs (one per line)",
-        height=150,
-        help="Enter direct URLs to image files."
-    )
+    image_urls_input = st.text_area("Or Enter Image URLs (one per line)", height=150, help="Enter direct URLs to image files.")
 
-# --- Initialization ---
 image_sources_input = []
-if uploaded_files:
-    image_sources_input.extend(uploaded_files)
+if uploaded_files: image_sources_input.extend(uploaded_files)
 if image_urls_input:
     urls = [url.strip() for url in image_urls_input.strip().split('\n') if url.strip()]
     image_sources_input.extend(urls)
 
 total_images = len(image_sources_input)
-processed_data = [] # List to store dicts for each processed image
+processed_data = []
 skipped_files = []
 processing_errors = []
 
-# --- Validation and Processing Trigger ---
-if not api_key:
-    st.warning("🚨 Please enter your OpenAI API key in the sidebar to begin.")
-elif not target_keyword:
-    st.warning("🎯 Please enter a target keyword in the sidebar.")
-elif not image_sources_input:
-    st.info("➕ Please upload images or provide URLs.")
-elif total_images > 50:
-    st.error(f"❌ Too many images ({total_images}). Please provide a maximum of 50 images.")
+if not api_key: st.warning("🚨 Please enter your OpenAI API key in the sidebar to begin.")
+elif not target_keyword: st.warning("🎯 Please enter a target keyword in the sidebar.")
+elif not image_sources_input: st.info("➕ Please upload images or provide URLs.")
+elif total_images > 20: st.error(f"❌ Too many images ({total_images}). Please provide a maximum of 20 images.")
 else:
-    # Process Button
     if st.button("✨ Optimize Images", type="primary"):
         client = OpenAI(api_key=api_key)
         st.header("⏳ Processing Images...")
         progress_bar = st.progress(0, text="Initializing...")
         start_time = time.time()
-
-        optimized_filenames_set = set() # For ensuring uniqueness
+        optimized_filenames_set = set()
 
         for idx, source in enumerate(image_sources_input):
             progress_text = f"Processing image {idx + 1} of {total_images}..."
             progress_bar.progress((idx + 1) / total_images, text=progress_text)
-
             image, original_filename, error = get_image_from_source(source)
             source_identifier = source if isinstance(source, str) else source.name
 
             if error:
                 skipped_files.append(f"{source_identifier} (Loading Error)")
                 processing_errors.append(error)
-                continue # Skip to the next image
-
+                continue
             if not image or not original_filename:
                  skipped_files.append(f"{source_identifier} (Load Failed)")
                  processing_errors.append(f"Failed to load image data for {source_identifier}")
                  continue
 
             try:
-                # 1. Compress Image (Outputting as JPEG)
                 compressed_buffer = BytesIO()
-                # Convert to RGB if it has transparency (alpha channel) for JPEG saving
-                if image.mode in ('RGBA', 'LA', 'P'):
-                     image = image.convert('RGB')
-                image.save(compressed_buffer, format="JPEG", quality=compression_quality, optimize=True)
+                img_for_compression = image.copy() # Work on a copy for compression
+                if img_for_compression.mode in ('RGBA', 'LA', 'P'):
+                     img_for_compression = img_for_compression.convert('RGB')
+                img_for_compression.save(compressed_buffer, format="JPEG", quality=compression_quality, optimize=True)
                 compressed_image_data = compressed_buffer.getvalue()
 
-                # 2. Prepare image for OpenAI (Use original or a PNG version for better analysis)
                 openai_image_buffer = BytesIO()
-                # Convert to RGB before saving as PNG if it's palette-based ('P') with transparency
-                # This avoids potential issues with OpenAI interpreting some PNG palettes
-                temp_image_for_openai = image
-                if temp_image_for_openai.mode == 'P':
-                     temp_image_for_openai = temp_image_for_openai.convert('RGBA') # Use RGBA to preserve transparency info if any
-                elif temp_image_for_openai.mode == 'LA':
-                     temp_image_for_openai = temp_image_for_openai.convert('RGBA') # Convert Luminance+Alpha too
-
-                # If image wasn't originally RGB (like RGBA, LA), convert to RGB *before* saving as PNG for OpenAI.
-                # This seems counter-intuitive, but helps avoid issues with how the Vision model interprets alpha channels sometimes.
-                # We already converted the main 'image' variable to RGB for JPEG saving if needed.
-                # Let's re-evaluate: Send PNG *with* transparency if present. Revert the conversion here.
-                # image.save(openai_image_buffer, format="PNG") # Send PNG to OpenAI - keep original mode
-                
-                # Let's stick to sending PNG, trying to preserve original mode where possible.
-                # Pillow handles PNG saving correctly for various modes.
-                image.save(openai_image_buffer, format="PNG")
+                image.save(openai_image_buffer, format="PNG") # Send original (or its PNG version) to OpenAI
                 base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
 
+                # --- START Keyword Sanitization for API ---
+                sanitized_keyword_for_api = target_keyword
+                try:
+                    # Attempt to encode to ASCII, ignoring errors, then decode back.
+                    # This removes non-ASCII characters.
+                    ascii_encoded_keyword = target_keyword.encode('ascii', 'ignore')
+                    sanitized_keyword_for_api = ascii_encoded_keyword.decode('ascii')
+                    if sanitized_keyword_for_api != target_keyword:
+                        # Log to console if changes were made. Avoid flooding UI with warnings.
+                        print(f"Console Log: Target keyword '{target_keyword}' sanitized to '{sanitized_keyword_for_api}' for API call for image {idx+1} ({original_filename}) due to non-ASCII characters.")
+                except Exception as e:
+                    # Fallback to original if sanitization itself causes an unexpected error
+                    print(f"Console Log: Error during keyword sanitization for API: {e}. Using original keyword: '{target_keyword}'")
+                    sanitized_keyword_for_api = target_keyword # Fallback
+                # --- END Keyword Sanitization for API ---
 
-                # 3. Call OpenAI API for filename and alt text
                 prompt = f"""
 Analyze the image and generate an SEO-optimized file name (without extension initially) and alt text.
-Target Keyword: '{target_keyword}'
+Target Keyword: '{sanitized_keyword_for_api}'
 
 Guidelines:
 - Filename: Descriptive, concise, hyphen-separated, naturally include keyword and key visual elements (objects, colors, setting, actions). NO file extension. Be specific but avoid excessive length.
@@ -231,159 +194,114 @@ Output ONLY in this exact JSON format:
 
                 try:
                     response = client.chat.completions.create(
-                        model="gpt-4o-mini", # Using the cheaper/faster mini model
+                        model="gpt-4o-mini",
                         messages=messages,
-                        max_tokens=150, # Reduced tokens needed
-                        temperature=0.1, # Slightly more creative but still consistent
-                        response_format={"type": "json_object"} # Enforce JSON output
+                        max_tokens=150,
+                        temperature=0.1,
+                        response_format={"type": "json_object"}
                     )
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename = result.get("base_filename", f"optimized-image-{idx+1}")
                     alt_text = result.get("alt_text", f"Image related to {target_keyword}")
-
                 except Exception as api_e:
-                    st.error(f"⚠️ OpenAI API error for image {idx+1}: {api_e}. Using default names.")
-                    processing_errors.append(f"OpenAI API error for {original_filename}: {api_e}")
-                    base_filename = f"api-error-image-{idx+1}"
+                    error_detail = str(api_e)
+                    if isinstance(api_e, UnicodeEncodeError): # Check if it's specifically this error
+                        error_detail += f" This can be caused by non-ASCII characters in the 'Target Keyword' ('{target_keyword}') when sending to the API. The script attempted to sanitize it."
+                    elif "response_format" in error_detail.lower(): # Check if API is complaining about JSON
+                        error_detail += " The API might have had trouble generating valid JSON. Check the prompt or model limitations."
+
+                    st.error(f"⚠️ OpenAI API error for image {idx+1} ({original_filename}): {error_detail}. Using default names.")
+                    processing_errors.append(f"OpenAI API error for {original_filename}: {error_detail}")
+                    base_filename = f"api-error-image-{idx+1}-{sanitized_project_number if sanitized_project_number else ''}".rstrip('-')
                     alt_text = f"Image related to {target_keyword} (API error)"
 
-                # 4. Construct Final Filename
-                # Sanitize AI-generated base filename
-                final_base_filename = sanitize_filename(base_filename)
 
-                # Append project number if provided
+                final_base_filename = sanitize_filename(base_filename)
                 if sanitized_project_number:
                     final_base_filename += f"-{sanitized_project_number}"
-
-                # Add extension (always .jpg because we compress to JPEG)
                 final_filename_with_ext = f"{final_base_filename}.jpg"
-
-                # Truncate if necessary
                 final_filename_with_ext = truncate_filename(final_filename_with_ext)
 
-                # Ensure uniqueness
                 unique_filename = final_filename_with_ext
                 counter = 1
                 while unique_filename in optimized_filenames_set:
                     name, ext = os.path.splitext(final_filename_with_ext)
-                    # Avoid adding number if it already ends with -number.ext
-                    if name.endswith(f"-{counter-1}"):
-                         name = name[:-(len(str(counter-1))+1)] # Adjust slicing index
-                    # Ensure name doesn't become empty after stripping counter part
-                    if not name: name = f"duplicate-{idx+1}" # Fallback if name becomes empty
+                    name_part_to_strip = f"-{counter-1}"
+                    if name.endswith(name_part_to_strip):
+                         name = name[:-len(name_part_to_strip)]
+                    if not name: name = f"duplicate-base-{idx+1}"
                     unique_filename = f"{name}-{counter}{ext}"
                     counter += 1
                 optimized_filenames_set.add(unique_filename)
 
-
-                # 5. Store results
                 processed_data.append({
                     "original_filename": original_filename,
                     "optimized_filename": unique_filename,
                     "alt_text": alt_text,
-                    "image_url": source if isinstance(source, str) else None, # Store URL if applicable
+                    "image_url": source if isinstance(source, str) else None,
                     "compressed_data": compressed_image_data,
-                    "pil_image": image # Keep original PIL object for display
+                    "pil_image": image
                 })
-
             except Exception as process_e:
                  skipped_files.append(f"{source_identifier} (Processing Error)")
                  processing_errors.append(f"Error processing {original_filename}: {process_e}")
-                 # Also log the traceback for debugging in the console
-                 import traceback
-                 print(f"Error processing {original_filename}:")
-                 traceback.print_exc()
-                 continue # Skip to next image
+                 print(f"--- Error processing {original_filename} ---") # Console log
+                 traceback.print_exc() # Print full traceback to console
+                 print("--- End of Error ---")
+                 continue
+            time.sleep(0.5)
 
-            # Optional delay
-            time.sleep(0.5) # Reduced delay
-
-        progress_bar.empty() # Remove progress bar
+        progress_bar.empty()
         end_time = time.time()
-        st.success(f"✅ Optimization complete for {len(processed_data)} images in {end_time - start_time:.2f} seconds!")
+        st.success(f"✅ Optimization complete for {len(processed_data)} of {total_images} images in {end_time - start_time:.2f} seconds!")
 
-        # --- Display Results and Downloads ---
         if processed_data:
             st.header("📊 Results & Downloads")
-
-            # Prepare data for display and CSV
-            display_df = pd.DataFrame([{
+            display_df_data = [{
                 "Original Filename": item["original_filename"],
                 "Optimized Filename": item["optimized_filename"],
                 "Alt Text": item["alt_text"],
                 "Original Source": item["image_url"] if item["image_url"] else "Uploaded"
-            } for item in processed_data])
+            } for item in processed_data]
+            if display_df_data: # Ensure there's data for the DataFrame
+                display_df = pd.DataFrame(display_df_data)
+                st.dataframe(display_df)
+            else:
+                st.info("No data to display in table.")
 
-            st.dataframe(display_df) # Display the dataframe
 
             col_dl1, col_dl2 = st.columns(2)
-
-            # CSV Download
             with col_dl1:
-                csv = display_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download CSV Summary",
-                    data=csv,
-                    file_name='image_seo_summary.csv',
-                    mime='text/csv',
-                    key='csv_download'
-                )
-
-            # Zip File Download
+                if display_df_data: # Only show button if there's data
+                    csv = display_df.to_csv(index=False).encode('utf-8')
+                    st.download_button("📥 Download CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
             with col_dl2:
                 zip_buffer = BytesIO()
                 with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                     for item in processed_data:
                         zip_file.writestr(item["optimized_filename"], item["compressed_data"])
+                if processed_data: # Only show button if there's data
+                    st.download_button("📦 Download Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_download')
 
-                st.download_button(
-                    label="📦 Download Optimized Images (.zip)",
-                    data=zip_buffer.getvalue(),
-                    file_name='optimized_images.zip',
-                    mime='application/zip',
-                    key='zip_download'
-                )
-
-            # Display Images
             st.header("🖼️ Optimized Image Preview")
-            if processed_data: # Check if there's data before trying to display
-                for idx, item in enumerate(processed_data):
-                     # Use a unique key for each expander
-                    with st.expander(f"Image {idx + 1}: {item.get('optimized_filename', 'N/A')}", expanded=False):
-                        # Check if 'pil_image' exists before displaying
+            if processed_data:
+                for idx_disp, item in enumerate(processed_data):
+                    with st.expander(f"Image {idx_disp + 1}: {item.get('optimized_filename', 'N/A')}", expanded=False):
                         if 'pil_image' in item:
-                            st.image(
-                                item["pil_image"], # Display original PIL object for preview
-                                caption=f"Optimized Filename: {item.get('optimized_filename', 'N/A')}",
-                                width=300 # Set specific width
-                            )
-                        else:
-                            st.warning("Preview not available for this item.")
-
+                            st.image(item["pil_image"], caption=f"Optimized Filename: {item.get('optimized_filename', 'N/A')}", width=300)
+                        else: st.warning("Preview not available for this item.")
                         st.markdown(f"**Alt Text:**")
-                        # Use get with a default value for safety
-                        st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{idx}", disabled=True)
+                        st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{idx_disp}", disabled=True)
             else:
                 st.info("No images were successfully processed to preview.")
 
-
-        # Display Skipped/Errored Files
         if skipped_files:
             st.header("⚠️ Skipped / Errored Items")
-            # Use a set to show unique errors if they are duplicated
-            unique_errors = set(processing_errors)
             for i, file_info in enumerate(skipped_files):
                 st.warning(f"- {file_info}")
-                # Display corresponding error if available (simple matching by index for now)
                 if i < len(processing_errors):
-                     st.error(f"  Error: {processing_errors[i]}", icon="🐛")
-            # Optionally print unique errors encountered if list is long
-            # if len(unique_errors) > 5:
-            #    st.subheader("Unique Errors Encountered:")
-            #    for error_msg in unique_errors:
-            #        st.caption(error_msg)
-
+                     st.error(f"  Error details: {processing_errors[i]}", icon="🐛")
 
 # --- Footer ---
 st.markdown("---")
