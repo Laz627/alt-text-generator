@@ -10,31 +10,28 @@ from openai import OpenAI
 import json
 import time
 import zipfile
-import traceback # For detailed error logging in console
+import traceback
 import sys
-from streamlit_image_comparison import image_comparison
+from streamlit_image_comparison import image_comparison # Import for slider
 
 # --- Configuration & Page Setup ---
 st.set_page_config(layout="wide", page_title="Image SEO Optimizer")
 
 # --- Helper Functions ---
 def sanitize_filename(filename):
-    """Removes invalid characters, replaces spaces with hyphens, ensures single hyphens."""
     sanitized = filename.lower().replace(' ', '-')
     sanitized = re.sub(r'[^a-z0-9\-]', '', sanitized)
     sanitized = re.sub(r'-+', '-', sanitized)
     sanitized = sanitized.strip('-')
     return sanitized
 
-def truncate_filename(filename, max_length=80): # Shortened max_length
-    """Truncates filename if it exceeds max_length, preserving the extension."""
+def truncate_filename(filename, max_length=80):
     if len(filename) <= max_length: return filename
     base_name, extension = os.path.splitext(filename)
     available_length = max_length - len(extension); truncated_base = base_name[:available_length]
     truncated_base = truncated_base.rstrip('-'); return f"{truncated_base}{extension}"
 
 def get_image_from_source(source):
-    """Loads a PIL Image and original bytes from either an uploaded file or a URL."""
     image = None; error = None; original_filename = None; original_data = None
     is_url = isinstance(source, str)
     try:
@@ -89,14 +86,12 @@ if image_urls_input: urls = [url.strip() for url in image_urls_input.strip().spl
 total_images = len(image_sources_input)
 processed_data = []; skipped_files = []; processing_errors = []
 
-# --- Format Size Helper Function (defined once outside the loop) ---
 def format_size(size_bytes):
-    if size_bytes is None or size_bytes < 0: return "N/A" # Handle None or invalid
+    if size_bytes is None or size_bytes < 0: return "N/A"
     if size_bytes == 0: return "0 B"
     size_kb = size_bytes / 1024
     if size_kb < 1024: return f"{size_kb:.1f} KB"
     size_mb = size_kb / 1024; return f"{size_mb:.1f} MB"
-# --- End Helper Function ---
 
 if not api_key: st.warning("🚨 Enter OpenAI API key in sidebar.")
 elif not target_keyword: st.warning("🎯 Enter target keyword in sidebar.")
@@ -117,12 +112,12 @@ else:
             source_identifier = source if isinstance(source, str) else source.name
 
             if error: skipped_files.append(f"{source_identifier} (Load Error)"); processing_errors.append(error); continue
-            if not image or not original_filename or original_image_data is None: # Check original_image_data explicitly
+            if not image or not original_filename or original_image_data is None:
                  skipped_files.append(f"{source_identifier} (Load Fail - Missing Data)")
                  processing_errors.append(f"Failed load or missing data: {source_identifier}"); continue
 
             try:
-                original_size_bytes = len(original_image_data) if original_image_data else 0 # Handle case where data might be empty
+                original_size_bytes = len(original_image_data) if original_image_data else 0
                 compressed_buffer = BytesIO()
                 image.save(compressed_buffer, format="WEBP", quality=compression_quality, lossless=False)
                 compressed_image_data = compressed_buffer.getvalue()
@@ -211,7 +206,7 @@ Output ONLY in this exact JSON format (no extra text or markdown):
                     "alt_text": alt_text, "original_size_bytes": original_size_bytes,
                     "compressed_size_bytes": compressed_size_bytes, "savings_percentage": savings_percentage,
                     "image_url": source if isinstance(source, str) else None,
-                    "compressed_data": compressed_image_data, "pil_image": image # Store original PIL for slider
+                    "compressed_data": compressed_image_data, "pil_image": image
                 })
             except Exception as process_e:
                  skipped_files.append(f"{source_identifier} (Processing Error)"); processing_errors.append(f"Error processing {original_filename}: {process_e}")
@@ -224,7 +219,6 @@ Output ONLY in this exact JSON format (no extra text or markdown):
         # --- Results Display Section ---
         if processed_data:
             st.header("📊 Results & Downloads")
-            # (format_size helper function defined above main app logic)
             display_df_data = [{"Original Filename": item["original_filename"], "Optimized Filename": item["optimized_filename"],
                                 "Alt Text": item["alt_text"], "Original Size": format_size(item["original_size_bytes"]),
                                 "Compressed Size": format_size(item["compressed_size_bytes"]),
@@ -234,15 +228,13 @@ Output ONLY in this exact JSON format (no extra text or markdown):
             else: st.info("No data for table.")
 
             col_dl1, col_dl2 = st.columns(2)
-            with col_dl1: # CSV Download
+            with col_dl1:
                 if display_df_data: csv = pd.DataFrame(display_df_data).to_csv(index=False).encode('utf-8'); st.download_button("📥 CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
-            with col_dl2: # ZIP Download
+            with col_dl2:
                 if processed_data:
                     zip_buffer = BytesIO()
-                    # Use standard for loop to avoid list of None return
                     with zipfile.ZipFile(zip_buffer,'w',zipfile.ZIP_DEFLATED) as zf:
-                        for item in processed_data:
-                            zf.writestr(item["optimized_filename"], item["compressed_data"])
+                        for item in processed_data: zf.writestr(item["optimized_filename"], item["compressed_data"])
                     st.download_button("📦 Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_download')
 
             # --- Modified Image Preview Section ---
@@ -250,27 +242,48 @@ Output ONLY in this exact JSON format (no extra text or markdown):
             if processed_data:
                 for i_disp, item in enumerate(processed_data):
                     with st.expander(f"Image {i_disp+1}: {item.get('optimized_filename', 'N/A')}", expanded=False):
+
+                        # --- Display Text Info FIRST ---
+                        st.markdown(f"**Optimized Filename:** `{item.get('optimized_filename', 'N/A')}`")
+                        original_fsize = format_size(item.get("original_size_bytes"))
+                        compressed_fsize = format_size(item.get("compressed_size_bytes"))
+                        savings_fpercent = f"{item.get('savings_percentage', 0.0):.1f}%" if item.get('original_size_bytes', 0) > 0 else "N/A"
+                        st.markdown(f"**Size:** {original_fsize} -> {compressed_fsize} (**Savings: {savings_fpercent}**)")
+                        st.markdown(f"**Alt Text:**"); st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{i_disp}", disabled=True)
+                        st.markdown("---") # Add a separator
+                        # --- End Text Info ---
+
+                        # --- Display Comparison Slider AFTER Text ---
                         if 'pil_image' in item and 'compressed_data' in item and item['compressed_data']:
                             try:
                                 compressed_pil_image = Image.open(BytesIO(item["compressed_data"]))
-                                st.markdown("**Compression Comparison:**")
-                                image_comparison(img1=item["pil_image"], img2=compressed_pil_image, label1="Original",
-                                                 label2=f"WebP Q{compression_quality}", width=600, starting_position=50,
-                                                 show_labels=True, make_responsive=True, in_memory=True)
-
-                                st.markdown(f"**Optimized Filename:** `{item.get('optimized_filename', 'N/A')}`")
-                                original_fsize = format_size(item.get("original_size_bytes")) # Use .get for safety
-                                compressed_fsize = format_size(item.get("compressed_size_bytes"))
-                                savings_fpercent = f"{item.get('savings_percentage', 0.0):.1f}%" if item.get('original_size_bytes', 0) > 0 else "N/A"
-                                st.markdown(f"**Size:** {original_fsize} -> {compressed_fsize} (**Savings: {savings_fpercent}**)")
+                                st.markdown("**Compression Comparison (Drag Slider):**")
+                                # --- Use image_comparison component - REMOVED width ---
+                                image_comparison(
+                                    img1=item["pil_image"],
+                                    img2=compressed_pil_image,
+                                    label1="Original",
+                                    label2=f"WebP Q{compression_quality}",
+                                    # width=600, # Relying on responsive width
+                                    starting_position=50,
+                                    show_labels=True,
+                                    make_responsive=True,
+                                    in_memory=True
+                                )
                             except Exception as img_load_err:
                                 st.warning(f"Could not display comparison slider for image {i_disp+1}: {img_load_err}")
+                                # Fallback: show static original image if slider fails
+                                st.markdown("**Original Image (Preview):**")
+                                st.image(item["pil_image"], width=300)
                         else:
-                            st.warning("Preview/Comparison data missing.")
-                            if 'pil_image' in item: st.image(item["pil_image"], caption=f"Original Preview", width=300)
+                            st.warning("Comparison slider data missing.")
+                            # Optionally show static original if slider fails/data missing
+                            if 'pil_image' in item:
+                                st.markdown("**Original Image (Preview):**")
+                                st.image(item["pil_image"], width=300)
 
-                        st.markdown(f"**Alt Text:**"); st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{i_disp}", disabled=True)
-            else: st.info("No images processed to preview.")
+            else:
+                st.info("No images processed to preview.")
             # --- End Modified Image Preview Section ---
 
         if skipped_files:
