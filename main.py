@@ -11,6 +11,7 @@ import json
 import time
 import zipfile
 import traceback # For detailed error logging in console
+import sys
 
 # --- Configuration & Page Setup ---
 st.set_page_config(layout="wide", page_title="Image SEO Optimizer")
@@ -63,6 +64,7 @@ def get_image_from_source(source):
 
 # --- Main App UI ---
 st.title("Image SEO Optimizer")
+st.write(f"**Debug Info:** Python Default Encoding: `{sys.getdefaultencoding()}`, Filesystem Encoding: `{sys.getfilesystemencoding()}`")
 st.write("**Author:** Brandon Lazovic")
 st.markdown("""
 Welcome to the **Image SEO Optimizer**! This tool enhances your images for SEO by:
