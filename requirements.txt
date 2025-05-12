@@ -1,7 +1,20 @@
+# Required libraries for the Image SEO Optimizer Streamlit App
+
 streamlit==1.34.0
 pandas==2.2.2
 requests==2.31.0
 Pillow==10.3.0
 openai==1.25.1
 httpx==0.27.0
-streamlit-image-comparison==0.3.2
+streamlit-image-comparison==0.0.4 # Corrected available version
+rich==13.7.1 # Pinned version compatible with Streamlit 1.34.0
+
+# --- Explanations ---
+# streamlit: The core framework for building the web app interface.
+# pandas: Used for creating and handling the results DataFrame and CSV export.
+# requests: Used for fetching images from URLs.
+# Pillow: Python Imaging Library (PIL) fork, used for images.
+# openai: The official OpenAI client library.
+# httpx: HTTP client often used by openai library.
+# streamlit-image-comparison: Component for the before/after slider.
+# rich: Required by Streamlit for formatted text output (pinned for compatibility).
