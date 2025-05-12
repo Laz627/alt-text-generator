@@ -57,7 +57,7 @@ st.write(f"**Debug Info:** Python Default Encoding: `{sys.getdefaultencoding()}`
 st.write("**Author:** Brandon Lazovic")
 st.markdown("""Welcome! Optimize images for SEO: AI filenames/alt text, project numbers, compression, zip download.""") # Shorter intro
 
-with st.expander("💡 ricorda: SEO Best Practices for Images"):
+with st.expander("SEO Best Practices for Images"):
     st.markdown("""- **Alt Text:** Concise, descriptive, keyword-rich (naturally), context-relevant, < 125 chars. Accessibility/Search.
 - **File Names:** Short, descriptive, hyphen-separated, keyword-rich (naturally). Avoid generic names. Use standard types.
 - **Compression:** Balance quality/size (JPEG photos, PNG graphics). Faster loads.
@@ -65,7 +65,7 @@ with st.expander("💡 ricorda: SEO Best Practices for Images"):
 - **Responsiveness:** `srcset` / `<picture>` for sizes.
 - **Structured Data:** Schema markup (`ImageObject`) for rich results.""") # More concise
 
-st.sidebar.header("⚙️ Configuration")
+st.sidebar.header("Configuration")
 api_key = st.sidebar.text_input("1. OpenAI API Key", type="password", help="Required for AI generation.")
 target_keyword = st.sidebar.text_input("2. Target Keyword", help="Primary keyword for optimization.")
 project_number = st.sidebar.text_input("3. Project Number (Optional)", help="Appended to filenames (e.g., image-slug-PN123.jpg).")
@@ -77,7 +77,7 @@ if project_number:
     if project_number != sanitized_project_number: st.sidebar.warning(f"PN sanitized: `{sanitized_project_number}`")
     if not sanitized_project_number: st.sidebar.warning("Invalid PN after sanitization, not used.")
 
-st.header("🖼️ Image Input (Max 20)")
+st.header("Image Input (Max 20)")
 col1, col2 = st.columns(2)
 with col1: uploaded_files = st.file_uploader("Upload Images", type=['png','jpg','jpeg','webp','gif','bmp','avif'], accept_multiple_files=True, help="Max 20 images.")
 with col2: image_urls_input = st.text_area("Or Enter Image URLs (one per line)", height=150, help="Direct image URLs.")
@@ -89,16 +89,16 @@ if image_urls_input: urls = [url.strip() for url in image_urls_input.strip().spl
 total_images = len(image_sources_input)
 processed_data = []; skipped_files = []; processing_errors = []
 
-if not api_key: st.warning("🚨 Enter OpenAI API key in sidebar.")
-elif not target_keyword: st.warning("🎯 Enter target keyword in sidebar.")
-elif not image_sources_input: st.info("➕ Upload images or provide URLs.")
-elif total_images > 20: st.error(f"❌ Max 20 images ({total_images} provided).")
+if not api_key: st.warning("Enter OpenAI API key in sidebar.")
+elif not target_keyword: st.warning("Enter target keyword in sidebar.")
+elif not image_sources_input: st.info("Upload images or provide URLs.")
+elif total_images > 20: st.error(f"Max 20 images ({total_images} provided).")
 else:
-    if st.button("✨ Optimize Images", type="primary"):
-        if not target_keyword: st.error("❌ Target keyword cannot be empty."); st.stop()
+    if st.button("Optimize Images", type="primary"):
+        if not target_keyword: st.error("Target keyword cannot be empty."); st.stop()
 
         client = OpenAI(api_key=api_key)
-        st.header("⏳ Processing Images...")
+        st.header("Processing Images...")
         progress_bar = st.progress(0, text="Initializing...")
         start_time = time.time(); optimized_filenames_set = set()
 
@@ -159,7 +159,7 @@ else:
                         base_filename = result.get("base_filename", f"optimized-image-{idx+1}")
                         alt_text = result.get("alt_text", f"Image related to {target_keyword}")
                     except json.JSONDecodeError as json_e:
-                        st.warning(f"⚠️ Could not parse API response for image {idx+1} (manual parse failed): {json_e}. Response: '{output[:100]}...'. Using defaults.")
+                        st.warning(f"Could not parse API response for image {idx+1} (manual parse failed): {json_e}. Response: '{output[:100]}...'. Using defaults.")
                         processing_errors.append(f"API JSON Parse Err {original_filename}: {json_e}")
                         base_filename = f"api-parse-error-{idx+1}-{sanitized_project_number if sanitized_project_number else ''}".rstrip('-')
                         alt_text = f"Image related to {target_keyword} (API parse error)"
@@ -172,7 +172,7 @@ else:
                                          f"Orig Keyword: '{target_keyword}', Sanitized: '{sanitized_keyword_for_api}'. "
                                          f"This usually points to an environment issue (check default encoding printed above) or a bug deep in the request library.")
                     elif "response_format" in error_detail.lower(): error_detail += " API trouble generating JSON." # Less likely now
-                    st.error(f"⚠️ OpenAI API error img {idx+1} ({original_filename}): {error_detail}. Defaults used.")
+                    st.error(f"OpenAI API error img {idx+1} ({original_filename}): {error_detail}. Defaults used.")
                     processing_errors.append(f"OpenAI API Err {original_filename}: {error_detail}")
                     base_filename = f"api-error-{idx+1}-{sanitized_project_number if sanitized_project_number else ''}".rstrip('-')
                     alt_text = f"Image related to {target_keyword} (API error)"
@@ -198,24 +198,24 @@ else:
             time.sleep(0.5) # Keep small delay
 
         progress_bar.empty(); end_time = time.time()
-        st.success(f"✅ Optimization done: {len(processed_data)}/{total_images} images in {end_time - start_time:.2f}s!")
+        st.success(f"Optimization done: {len(processed_data)}/{total_images} images in {end_time - start_time:.2f}s!")
 
         if processed_data:
-            st.header("📊 Results & Downloads")
+            st.header("Results & Downloads")
             df_data = [{"Original Filename":i["original_filename"],"Optimized Filename":i["optimized_filename"],"Alt Text":i["alt_text"],"Original Source":i["image_url"] if i["image_url"] else "Uploaded"} for i in processed_data]
             if df_data: st.dataframe(pd.DataFrame(df_data))
             else: st.info("No data for table.")
 
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                if df_data: csv = pd.DataFrame(df_data).to_csv(index=False).encode('utf-8'); st.download_button("📥 CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_dl')
+                if df_data: csv = pd.DataFrame(df_data).to_csv(index=False).encode('utf-8'); st.download_button("CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_dl')
             with col_dl2:
                 if processed_data:
                     zip_buffer = BytesIO()
                     with zipfile.ZipFile(zip_buffer,'w',zipfile.ZIP_DEFLATED) as zf: [zf.writestr(item["optimized_filename"], item["compressed_data"]) for item in processed_data]
-                    st.download_button("📦 Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_dl')
+                    st.download_button("Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_dl')
 
-            st.header("🖼️ Optimized Image Preview")
+            st.header("Optimized Image Preview")
             if processed_data:
                 for i_disp, item in enumerate(processed_data):
                     with st.expander(f"Image {i_disp+1}: {item.get('optimized_filename', 'N/A')}", expanded=False):
@@ -225,9 +225,9 @@ else:
             else: st.info("No images processed to preview.")
 
         if skipped_files:
-            st.header("⚠️ Skipped / Errored Items")
+            st.header("Skipped / Errored Items")
             for i, file_info in enumerate(skipped_files):
                 st.warning(f"- {file_info}")
                 if i < len(processing_errors): st.error(f"  Details: {processing_errors[i]}", icon="🐛")
 
-st.markdown("---"); st.markdown("Built with ❤️ using Streamlit & OpenAI") # Keep heart emoji here? Seems less likely to cause issues than rocket.
+st.markdown("---"); st.markdown("Built with using Streamlit & OpenAI") # Keep heart emoji here? Seems less likely to cause issues than rocket.
