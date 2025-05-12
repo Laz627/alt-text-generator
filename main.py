@@ -12,6 +12,7 @@ import time
 import zipfile
 import traceback # For detailed error logging in console
 import sys
+from streamlit_image_comparison import image_comparison # <-- IMPORT FOR SLIDER
 
 # --- Configuration & Page Setup ---
 st.set_page_config(layout="wide", page_title="Image SEO Optimizer")
@@ -54,7 +55,7 @@ def get_image_from_source(source):
 
 # --- Main App UI ---
 st.title("Image SEO Optimizer")
-# st.write(f"**Debug Info:** Python Default Encoding: `{sys.getdefaultencoding()}`, Filesystem Encoding: `{sys.getfilesystemencoding()}`") # Usually safe to comment out now
+# st.write(f"**Debug Info:** Python Default Encoding: `{sys.getdefaultencoding()}`, Filesystem Encoding: `{sys.getfilesystemencoding()}`")
 st.write("**Author:** Brandon Lazovic")
 st.markdown("""Optimize images for SEO: AI filenames/alt text, project numbers, WebP compression, zip download.""")
 
@@ -62,7 +63,7 @@ with st.expander("SEO Best Practices for Images"):
     st.markdown("""- **Alt Text:** Concise, descriptive, keyword-rich, context-relevant, < 125 chars.
 - **File Names:** Short, descriptive, hyphen-separated, keyword-rich. Use `.webp`, `.jpg`, `.png`.
 - **Compression:** Balance quality/size. WebP often best for web. Savings vary based on original.
-- **Context & Responsiveness:** Place near relevant text, use `srcset`.""") # Added note on savings variation
+- **Context & Responsiveness:** Place near relevant text, use `srcset`.""")
 
 st.sidebar.header("⚙️ Configuration")
 api_key = st.sidebar.text_input("1. OpenAI API Key", type="password", help="Required for AI generation.")
@@ -88,6 +89,15 @@ if image_urls_input: urls = [url.strip() for url in image_urls_input.strip().spl
 total_images = len(image_sources_input)
 processed_data = []; skipped_files = []; processing_errors = []
 
+# --- Format Size Helper Function (defined once outside the loop) ---
+def format_size(size_bytes):
+    if size_bytes is None or size_bytes < 0: return "N/A" # Handle None or invalid
+    if size_bytes == 0: return "0 B"
+    size_kb = size_bytes / 1024
+    if size_kb < 1024: return f"{size_kb:.1f} KB"
+    size_mb = size_kb / 1024; return f"{size_mb:.1f} MB"
+# --- End Helper Function ---
+
 if not api_key: st.warning("🚨 Enter OpenAI API key in sidebar.")
 elif not target_keyword: st.warning("🎯 Enter target keyword in sidebar.")
 elif not image_sources_input: st.info("➕ Upload images or provide URLs.")
@@ -107,12 +117,14 @@ else:
             source_identifier = source if isinstance(source, str) else source.name
 
             if error: skipped_files.append(f"{source_identifier} (Load Error)"); processing_errors.append(error); continue
-            if not image or not original_filename or not original_image_data: skipped_files.append(f"{source_identifier} (Load Fail - Missing Data)"); processing_errors.append(f"Failed load or missing data: {source_identifier}"); continue
+            if not image or not original_filename or original_image_data is None: # Check original_image_data explicitly
+                 skipped_files.append(f"{source_identifier} (Load Fail - Missing Data)")
+                 processing_errors.append(f"Failed load or missing data: {source_identifier}"); continue
 
             try:
-                original_size_bytes = len(original_image_data)
+                original_size_bytes = len(original_image_data) if original_image_data else 0 # Handle case where data might be empty
                 compressed_buffer = BytesIO()
-                image.save(compressed_buffer, format="WEBP", quality=compression_quality, lossless=False) # Saving as WebP
+                image.save(compressed_buffer, format="WEBP", quality=compression_quality, lossless=False)
                 compressed_image_data = compressed_buffer.getvalue()
                 compressed_size_bytes = len(compressed_image_data)
                 savings_percentage = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100 if original_size_bytes > 0 else 0.0
@@ -163,7 +175,7 @@ Output ONLY in this exact JSON format (no extra text or markdown):
                         base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
                         alt_text = result.get("alt_text", f"Image related to {target_keyword}")
                     except json.JSONDecodeError as json_e:
-                        st.warning(f"⚠️ OpenAI response format unexpected for image {idx+1}. Using defaults. (Error: {json_e})") # Refined warning
+                        st.warning(f"⚠️ OpenAI response format unexpected for image {idx+1}. Using defaults. (Error: {json_e})")
                         print(f"Console: JSON Parse Err img {idx+1}. Raw output snippet: {output[:100]}...")
                         processing_errors.append(f"API JSON Parse Err {original_filename}: {json_e}")
                         base_filename_from_api = f"api-parse-error-{idx+1}"
@@ -183,18 +195,14 @@ Output ONLY in this exact JSON format (no extra text or markdown):
                 sanitized_base_name = sanitize_filename(base_filename_from_api)
                 filename_core = sanitized_base_name
                 if sanitized_project_number: filename_core += f"-{sanitized_project_number}"
-                final_filename_with_ext = f"{filename_core}.webp" # Using .webp extension
+                final_filename_with_ext = f"{filename_core}.webp"
 
-                final_filename_with_ext = truncate_filename(final_filename_with_ext) # Truncate full name with extension
+                final_filename_with_ext = truncate_filename(final_filename_with_ext)
                 unique_filename = final_filename_with_ext; counter = 1
                 while unique_filename in optimized_filenames_set:
-                    # Create unique name by appending -1, -2 etc. BEFORE the extension
                     core_name_no_ext, ext = os.path.splitext(final_filename_with_ext)
-                    # Handle cases where the core name already ends with -N from previous attempt
-                    if counter > 1 and core_name_no_ext.endswith(f'-{counter-1}'):
-                         core_name_no_ext = core_name_no_ext[:-len(f'-{counter-1}')]
-
-                    unique_filename = f"{core_name_no_ext}-{counter}{ext}"; # Re-add original extension (.webp)
+                    if counter > 1 and core_name_no_ext.endswith(f'-{counter-1}'): core_name_no_ext = core_name_no_ext[:-len(f'-{counter-1}')]
+                    unique_filename = f"{core_name_no_ext}-{counter}{ext}";
                     counter += 1
                 optimized_filenames_set.add(unique_filename)
 
@@ -203,7 +211,7 @@ Output ONLY in this exact JSON format (no extra text or markdown):
                     "alt_text": alt_text, "original_size_bytes": original_size_bytes,
                     "compressed_size_bytes": compressed_size_bytes, "savings_percentage": savings_percentage,
                     "image_url": source if isinstance(source, str) else None,
-                    "compressed_data": compressed_image_data, "pil_image": image
+                    "compressed_data": compressed_image_data, "pil_image": image # Store original PIL for slider
                 })
             except Exception as process_e:
                  skipped_files.append(f"{source_identifier} (Processing Error)"); processing_errors.append(f"Error processing {original_filename}: {process_e}")
@@ -213,50 +221,57 @@ Output ONLY in this exact JSON format (no extra text or markdown):
         progress_bar.empty(); end_time = time.time()
         st.success(f"✅ Optimization done: {len(processed_data)}/{total_images} images in {end_time - start_time:.2f}s!")
 
+        # --- Results Display Section ---
         if processed_data:
             st.header("📊 Results & Downloads")
-            def format_size(size_bytes):
-                if size_bytes == 0: return "0 B"
-                size_kb = size_bytes / 1024
-                if size_kb < 1024: return f"{size_kb:.1f} KB"
-                size_mb = size_kb / 1024; return f"{size_mb:.1f} MB"
-
+            # (format_size helper function defined above main app logic)
             display_df_data = [{"Original Filename": item["original_filename"], "Optimized Filename": item["optimized_filename"],
                                 "Alt Text": item["alt_text"], "Original Size": format_size(item["original_size_bytes"]),
                                 "Compressed Size": format_size(item["compressed_size_bytes"]),
                                 "Savings (%)": f"{item['savings_percentage']:.1f}%" if item['original_size_bytes'] > 0 else "N/A",
                                 "Original Source": item["image_url"] if item["image_url"] else "Uploaded"} for item in processed_data]
-
             if display_df_data: st.dataframe(pd.DataFrame(display_df_data))
             else: st.info("No data for table.")
 
             col_dl1, col_dl2 = st.columns(2)
-            with col_dl1:
+            with col_dl1: # CSV Download
                 if display_df_data: csv = pd.DataFrame(display_df_data).to_csv(index=False).encode('utf-8'); st.download_button("📥 CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
-            with col_dl2:
+            with col_dl2: # ZIP Download
                 if processed_data:
                     zip_buffer = BytesIO()
-                    # --- CORRECTED: Using a standard for loop for Zip ---
+                    # Use standard for loop to avoid list of None return
                     with zipfile.ZipFile(zip_buffer,'w',zipfile.ZIP_DEFLATED) as zf:
                         for item in processed_data:
                             zf.writestr(item["optimized_filename"], item["compressed_data"])
-                    # --- END CORRECTION ---
                     st.download_button("📦 Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_download')
 
-
-            st.header("🖼️ Optimized Image Preview")
+            # --- Modified Image Preview Section ---
+            st.header("🖼️ Optimized Image Preview & Comparison")
             if processed_data:
                 for i_disp, item in enumerate(processed_data):
                     with st.expander(f"Image {i_disp+1}: {item.get('optimized_filename', 'N/A')}", expanded=False):
-                        if 'pil_image' in item:
-                            st.image(item["pil_image"], caption=f"Optimized: {item.get('optimized_filename', 'N/A')}", width=300)
-                            original_fsize = format_size(item["original_size_bytes"])
-                            compressed_fsize = format_size(item["compressed_size_bytes"])
-                            savings_fpercent = f"{item['savings_percentage']:.1f}%" if item['original_size_bytes'] > 0 else "N/A"
-                            st.markdown(f"**Size:** {original_fsize} -> {compressed_fsize} (**Savings: {savings_fpercent}**)")
-                        else: st.warning("No preview.")
+                        if 'pil_image' in item and 'compressed_data' in item and item['compressed_data']:
+                            try:
+                                compressed_pil_image = Image.open(BytesIO(item["compressed_data"]))
+                                st.markdown("**Compression Comparison:**")
+                                image_comparison(img1=item["pil_image"], img2=compressed_pil_image, label1="Original",
+                                                 label2=f"WebP Q{compression_quality}", width=600, starting_position=50,
+                                                 show_labels=True, make_responsive=True, in_memory=True)
+
+                                st.markdown(f"**Optimized Filename:** `{item.get('optimized_filename', 'N/A')}`")
+                                original_fsize = format_size(item.get("original_size_bytes")) # Use .get for safety
+                                compressed_fsize = format_size(item.get("compressed_size_bytes"))
+                                savings_fpercent = f"{item.get('savings_percentage', 0.0):.1f}%" if item.get('original_size_bytes', 0) > 0 else "N/A"
+                                st.markdown(f"**Size:** {original_fsize} -> {compressed_fsize} (**Savings: {savings_fpercent}**)")
+                            except Exception as img_load_err:
+                                st.warning(f"Could not display comparison slider for image {i_disp+1}: {img_load_err}")
+                        else:
+                            st.warning("Preview/Comparison data missing.")
+                            if 'pil_image' in item: st.image(item["pil_image"], caption=f"Original Preview", width=300)
+
                         st.markdown(f"**Alt Text:**"); st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{i_disp}", disabled=True)
             else: st.info("No images processed to preview.")
+            # --- End Modified Image Preview Section ---
 
         if skipped_files:
             st.header("⚠️ Skipped / Errored Items")
