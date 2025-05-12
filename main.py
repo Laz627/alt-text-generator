@@ -109,7 +109,7 @@ if project_number:
         st.sidebar.warning("Invalid project number entered after sanitization, it will not be used.")
 
 
-st.header("🖼️ Image Input (Max 20)")
+st.header("🖼️ Image Input (Max 50)")
 col1, col2 = st.columns(2)
 
 with col1:
@@ -117,7 +117,7 @@ with col1:
         "Upload Images",
         type=['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif'], # Added more types
         accept_multiple_files=True,
-        help="You can upload up to 20 images."
+        help="You can upload up to 50 images."
     )
 
 with col2:
@@ -147,8 +147,8 @@ elif not target_keyword:
     st.warning("🎯 Please enter a target keyword in the sidebar.")
 elif not image_sources_input:
     st.info("➕ Please upload images or provide URLs.")
-elif total_images > 20:
-    st.error(f"❌ Too many images ({total_images}). Please provide a maximum of 20 images.")
+elif total_images > 50:
+    st.error(f"❌ Too many images ({total_images}). Please provide a maximum of 50 images.")
 else:
     # Process Button
     if st.button("✨ Optimize Images", type="primary"):
