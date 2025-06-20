@@ -70,7 +70,7 @@ st.markdown("""Optimize images for SEO: AI filenames/alt text, WebP compression,
 st.sidebar.header("⚙️ Configuration")
 api_key = st.sidebar.text_input("1. OpenAI API Key", type="password", help="Required for AI generation.")
 
-# Updated input fields as per user request
+# Correct input fields as previously defined
 keyword = st.sidebar.text_input("2. Keyword", help="Primary keyword for optimization (e.g., 'home exterior').")
 service_type = st.sidebar.text_input("3. Service Type (Optional)", help="e.g., 'window replacement'.")
 product_type = st.sidebar.text_input("4. Product Type (Optional)", help="e.g., 'Pella casement windows'.")
@@ -78,7 +78,7 @@ city_geo_target = st.sidebar.text_input("5. City / GEO Target (Optional)", help=
 project_number = st.sidebar.text_input("6. Project Number (Optional)", help="Appended to filenames (e.g., image-slug-PN123.webp).")
 compression_quality = st.sidebar.slider("7. WebP Compression Quality", 1, 100, 80, help="Adjust WebP quality. Higher = better quality, larger file.")
 
-# Sanitize project number (same logic as original)
+# Sanitize project number
 sanitized_project_number = ""
 if project_number:
     sanitized_project_number = re.sub(r'[^a-zA-Z0-9\-]', '', project_number).strip('-')
@@ -96,7 +96,7 @@ if image_urls_input: urls = [url.strip() for url in image_urls_input.strip().spl
 
 total_images = len(image_sources_input)
 
-# Initialize Session State (same as original)
+# Initialize Session State
 if 'processed_data' not in st.session_state: st.session_state.processed_data = []
 if 'compare_index' not in st.session_state: st.session_state.compare_index = None
 
@@ -107,8 +107,8 @@ elif not image_sources_input: st.info("➕ Upload images or provide URLs to begi
 elif total_images > 20: st.error(f"❌ Max 20 images ({total_images} provided).")
 else:
     if st.button("✨ Optimize Images", type="primary"):
-        st.session_state.processed_data = [] # Clear previous results
-        st.session_state.compare_index = None # Reset comparison view
+        st.session_state.processed_data = []
+        st.session_state.compare_index = None
 
         client = OpenAI(api_key=api_key)
         st.header("⏳ Processing Images...")
@@ -139,36 +139,40 @@ else:
                 openai_image_buffer = BytesIO(); image.save(openai_image_buffer, format="PNG")
                 base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
 
-                # --- MODIFIED PROMPT WITH NEW OPTIONAL FIELDS ---
+                # --- REVISED AND IMPROVED PROMPT ---
                 prompt_text_for_api = f"""
-Analyze the image and generate SEO data based on the context below.
-Your task is to generate ONLY a single, valid JSON object with two keys: "base_filename" and "alt_text".
+Your task is to analyze the provided image and generate a single, valid JSON object for SEO purposes, based on the specific context I provide.
 
-**CONTEXT:**
+**CONTEXTUAL DETAILS:**
 - Primary Keyword: '{keyword}'
 - Service Type: '{service_type if service_type else "Not provided"}'
 - Product Type: '{product_type if product_type else "Not provided"}'
 - Location: '{city_geo_target if city_geo_target else "Not provided"}'
 
-**INSTRUCTIONS:**
-1.  **`base_filename`**: Create a concise, descriptive, hyphenated name using 3-5 keywords from the image. If a Location is provided, integrate it. Example: `new-pella-windows-topeka-ks`. Do NOT include a file extension.
-2.  **`alt_text`**: Write a natural, descriptive sentence (< 125 chars). Describe the image accurately. If provided, you MUST naturally include the Service Type. Also include the Product Type and Location if they fit naturally. Example: "A home in Topeka, KS, after a successful window replacement featuring new Pella casement windows."
+**CRITICAL INSTRUCTIONS:**
+1.  **`base_filename`**: Create a descriptive, hyphenated filename.
+    - It **MUST** incorporate the most important descriptive words from the context, such as materials (e.g., 'wood'), product types, and the location.
+    - Prioritize accuracy over being overly short.
+    - **Example of a good filename:** `wood-casement-windows-topeka-ks`
+2.  **`alt_text`**: Write a natural, descriptive sentence under 125 characters.
+    - You **MUST** naturally include the **Service Type** (e.g., '...as part of a window replacement...').
+    - Also integrate descriptive terms from the Product Type (like 'wood casement') and the Location.
+    - **Example of good alt text:** "A home's new wood casement windows after a window replacement project in Topeka, KS."
 
 **IMPORTANT: Output ONLY the JSON object, with no other text, explanations, or markdown.**
 ```json
 {{
-  "base_filename": "your-concise-hyphenated-base-name",
+  "base_filename": "your-descriptive-hyphenated-name",
   "alt_text": "Your descriptive alt text sentence."
 }}```
 """
                 messages = [{"role": "user", "content": [{"type": "text", "text": prompt_text_for_api}, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}]}]
                 
-                # Default values in case of API failure
                 base_filename_from_api = f"api-error-{idx+1}"
                 alt_text = f"Image related to {keyword}"
                 
                 try:
-                    response = client.chat.completions.create(model="gpt-4-turbo", messages=messages, max_tokens=200, temperature=0.2, response_format={"type": "json_object"})
+                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=0.2, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
@@ -186,7 +190,6 @@ Your task is to generate ONLY a single, valid JSON object with two keys: "base_f
                 final_filename_with_ext = f"{filename_core}.webp"
                 final_filename_with_ext = truncate_filename(final_filename_with_ext)
 
-                # Restored duplicate filename handling
                 unique_filename = final_filename_with_ext; counter = 1
                 while unique_filename in optimized_filenames_set:
                     core_name_no_ext, ext = os.path.splitext(final_filename_with_ext)
@@ -220,7 +223,7 @@ Your task is to generate ONLY a single, valid JSON object with two keys: "base_f
         
         st.rerun()
 
-# --- Results Display Section (Restored to original state) ---
+# --- Results Display Section ---
 if st.session_state.processed_data:
     processed_data_display = [item for item in st.session_state.processed_data if item.get('status') == 'success']
 
@@ -234,9 +237,9 @@ if st.session_state.processed_data:
         st.dataframe(pd.DataFrame(display_df_data))
 
         col_dl1, col_dl2 = st.columns(2)
-        with col_dl1: # CSV Download
+        with col_dl1:
             csv = pd.DataFrame(display_df_data).to_csv(index=False).encode('utf-8'); st.download_button("📥 CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
-        with col_dl2: # ZIP Download
+        with col_dl2:
             zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer,'w',zipfile.ZIP_DEFLATED) as zf:
                 for item in processed_data_display: zf.writestr(item["optimized_filename"], item["compressed_data"])
@@ -248,7 +251,6 @@ if st.session_state.processed_data:
                 st.markdown(f"**Optimized Filename:** `{item.get('optimized_filename', 'N/A')}`")
                 st.markdown(f"**Alt Text:**"); st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{i_disp}", disabled=True)
                 
-                # THIS IS THE CORRECTED LINE:
                 if image_comparison_available and 'original_data' in item and item['original_data'] and 'compressed_data' in item and item['compressed_data']:
                     if st.button("Compare Original vs. Compressed", key=f"compare_btn_{i_disp}"):
                         st.session_state.compare_index = i_disp
@@ -257,7 +259,7 @@ if st.session_state.processed_data:
                     st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview (Comparison tool not available)", width=250)
 
 
-    # --- Comparison Container Logic (Restored from original) ---
+    # --- Comparison Container Logic ---
     if st.session_state.get('compare_index') is not None:
         idx_to_compare = st.session_state.compare_index
         item_to_compare = processed_data_display[idx_to_compare]
@@ -269,7 +271,7 @@ if st.session_state.processed_data:
                 compressed_img_compare = Image.open(BytesIO(item_to_compare["compressed_data"]))
                 if image_comparison_available:
                     image_comparison(img1=original_img_compare, img2=compressed_img_compare, label1="Original", label2=f"WebP Q{compression_quality}")
-                else: # Fallback if library not installed
+                else:
                     col1_comp, col2_comp = st.columns(2)
                     with col1_comp: st.image(original_img_compare, caption="Original")
                     with col2_comp: st.image(compressed_img_compare, caption=f"WebP Q{compression_quality}")
