@@ -139,29 +139,22 @@ else:
                 openai_image_buffer = BytesIO(); image.save(openai_image_buffer, format="PNG")
                 base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
 
-                # --- FINAL REVISION OF THE PROMPT ---
-                prompt_text_for_api = f"""
+                # --- DYNAMIC PROMPT LOGIC ---
+                has_optional_context = service_type or product_type or city_geo_target
+                
+                # Base prompt structure for both cases
+                prompt_template = """
 Your task is to analyze an image and generate a single, valid JSON object with `base_filename` and `alt_text`.
 
 **CONTEXTUAL DETAILS to incorporate:**
 - Primary Keyword: '{keyword}'
-- Service Type: '{service_type if service_type else "Not provided"}'
-- Product Type: '{product_type if product_type else "Not provided"}'
-- Location: '{city_geo_target if city_geo_target else "Not provided"}'
+- Service Type: '{service_type}'
+- Product Type: '{product_type}'
+- Location: '{city_geo_target}'
 
 **CRITICAL INSTRUCTIONS:**
 
-1.  **For `base_filename`**:
-    - Create a concise, descriptive, hyphenated filename.
-    - It must focus on the physical subject, using the **Product Type** and **Location**.
-    - **Do NOT include the Service Type** in the filename. The filename describes the 'what' and 'where', not the 'how'.
-    - **GOOD Example:** `lifestyle-series-wood-windows-salina-ks`
-    - **BAD Example:** `lifestyle-series-wood-windows-window-replacement-salina-ks`
-
-2.  **For `alt_text`**:
-    - Construct a descriptive sentence that sounds natural and human-written.
-    - It should accurately describe the image and incorporate the **Product Type**, **Service Type**, and **Location** in a conversational way.
-    - **GOOD Example:** "A new bay of Pella Lifestyle Series wood windows on a tan home in Salina, KS, after a complete window replacement."
+{instructions}
 
 **IMPORTANT: Output ONLY the final, polished JSON object.**
 ```json
@@ -170,13 +163,52 @@ Your task is to analyze an image and generate a single, valid JSON object with `
   "alt_text": "Your natural, human-sounding alt text."
 }}```
 """
+                if has_optional_context:
+                    # Instructions for when full context is provided
+                    instructions = """
+1.  **For `base_filename`**:
+    - Create a concise, descriptive filename focusing on the physical subject. Use the **Product Type** and **Location**.
+    - **Do NOT include the Service Type**. The filename describes the 'what' and 'where', not the 'how'.
+    - **GOOD Example:** `lifestyle-series-wood-windows-salina-ks`
+    - **BAD Example:** `lifestyle-series-wood-windows-window-replacement-salina-ks`
+
+2.  **For `alt_text`**:
+    - Construct a descriptive sentence that sounds natural and human-written.
+    - Accurately describe the image and incorporate the **Product Type**, **Service Type**, and **Location** in a conversational way.
+    - **GOOD Example:** "A new bay of Pella Lifestyle Series wood windows on a tan home in Salina, KS, after a complete window replacement."
+"""
+                else:
+                    # Instructions for when ONLY keyword is provided
+                    instructions = """
+1.  **For `base_filename`**:
+    - **Analyze the image for its main visual subject** (e.g., 'bay window', 'tan siding', 'shingled roof').
+    - Create a filename from these visual details first, then weave in the Primary Keyword if it fits. Do not just repeat the keyword.
+    - **GOOD Example (for a photo of a bay window and keyword 'exterior windows'):** `tan-siding-bay-window-exterior.webp`
+    - **BAD Example (just repeating the keyword):** `lifestyle-series-wood-windows.webp`
+
+2.  **For `alt_text`**:
+    - Construct a descriptive sentence that sounds natural and human-written.
+    - Accurately describe the image and incorporate the **Primary Keyword** in a conversational way.
+    - **GOOD Example:** "A set of Pella Lifestyle Series wood windows installed on the bay of a tan house, with sunlight casting shadows and potted plants nearby."
+"""
+                
+                prompt_text_for_api = prompt_template.format(
+                    keyword=keyword,
+                    service_type=service_type or "Not provided",
+                    product_type=product_type or "Not provided",
+                    city_geo_target=city_geo_target or "Not provided",
+                    instructions=instructions
+                )
+
                 messages = [{"role": "user", "content": [{"type": "text", "text": prompt_text_for_api}, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}]}]
                 
                 base_filename_from_api = f"api-error-{idx+1}"
                 alt_text = f"Image related to {keyword}"
                 
                 try:
-                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=0.4, response_format={"type": "json_object"})
+                    # Use a slightly higher temperature for the more creative 'keyword-only' prompt
+                    temp = 0.4 if not has_optional_context else 0.3
+                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
