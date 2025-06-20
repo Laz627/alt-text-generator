@@ -197,7 +197,7 @@ else:
                 try:
                     # Slightly increased temperature to allow for more creativity in the visual-first prompt
                     temp = 0.4 if not has_context else 0.2 
-                    response = client.chat.completions.create(model="gpt-4-turbo", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
+                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
