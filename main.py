@@ -248,7 +248,8 @@ if st.session_state.processed_data:
                 st.markdown(f"**Optimized Filename:** `{item.get('optimized_filename', 'N/A')}`")
                 st.markdown(f"**Alt Text:**"); st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{i_disp}", disabled=True)
                 
-                if image_comparison_available and 'original_data' in item and item['original_data'] and 'compressed_data' in item and 'compressed_data']:
+                # THIS IS THE CORRECTED LINE:
+                if image_comparison_available and 'original_data' in item and item['original_data'] and 'compressed_data' in item and item['compressed_data']:
                     if st.button("Compare Original vs. Compressed", key=f"compare_btn_{i_disp}"):
                         st.session_state.compare_index = i_disp
                         st.rerun()
