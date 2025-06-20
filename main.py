@@ -157,22 +157,20 @@ else:
                     filename_instructions = """
     - **Analyze the image for its main visual subject** (e.g., 'bay window', 'tan siding').
     - Build the filename **primarily from these visual details**.
-    - After creating the visual filename, you may add one relevant term from the Primary Keyword if it enhances the description.
     - **GOOD Example:** `tan-siding-bay-window-exterior`
 """
                 # Alt Text Instructions
                 if has_alt_text_context:
                     alt_text_instructions = """
-    - Your main goal is to write a natural, human-sounding description of the image.
-    - Use the context fields (Service Type, Product Type, Location, Additional Context) as background information to enrich this description.
-    - Weave this information into the description conversationally. Do not just list the keywords.
-    - **GOOD Example:** "This before-photo shows the old, multi-pane casement windows on a tan home in Salina, KS, prior to a full window replacement project."
+    - Weave the context fields (Service Type, Product Type, Location, etc.) into a natural, human-sounding description of the image.
+    - The final text **MUST be a single, concise sentence under 125 characters.**
+    - **GOOD Example:** "A before-photo of old casement windows on a Salina, KS home, prior to a full window replacement."
 """
                 else:
                     alt_text_instructions = """
-    - First, describe the image's visual content in a human-sounding way.
-    - After describing the image, find a natural way to include the **Primary Keyword**.
-    - **GOOD Example:** "A lovely bay window on a tan home, surrounded by potted plants, showcasing high-quality exterior windows."
+    - First, describe the image's visual content in a human-sounding way. Then, find a natural way to include the **Primary Keyword**.
+    - The final text **MUST be a single, concise sentence under 125 characters.**
+    - **GOOD Example:** "A sunlit bay window with dark trim on a tan house, featuring beautiful exterior home windows."
 """
                 # --- Assemble Final Prompt ---
                 prompt_text_for_api = f"""
@@ -208,7 +206,7 @@ Your task is to analyze the image and generate a single, valid JSON object with 
                 try:
                     # Use a slightly higher temperature for the more creative prompts
                     temp = 0.4 if not has_filename_context else 0.2
-                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
+                    response = client.chat.completions.create(model="gpt-4-turbo", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
