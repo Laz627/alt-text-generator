@@ -149,9 +149,10 @@ else:
                 # Filename Instructions
                 if has_filename_context:
                     filename_instructions = """
-    - Create a concise filename using the **Product Type** and **Location**.
-    - **Do NOT include the Service Type or Additional Context**.
-    - **GOOD Example:** `pella-lifestyle-windows-salina-ks`
+    - Use the **Product Type** as the primary basis for the filename.
+    - Enhance it with specific nouns from the **Primary Keyword** if they add necessary detail (e.g., 'patio-door').
+    - Include the **Location**. Do **NOT** include the Service Type or Additional Context.
+    - **GOOD Example:** `lifestyle-series-picture-windows-patio-door-salina-ks`
 """
                 else:
                     filename_instructions = """
@@ -162,9 +163,9 @@ else:
                 # Alt Text Instructions
                 if has_alt_text_context:
                     alt_text_instructions = """
-    - Identify 2-3 key visual details and weave them together with the provided context (Service Type, Product Type, Location, etc.).
+    - Tell a short, descriptive story about the image. Start with the main visual subject, then weave in the context from the background information.
     - The final text **MUST be a single, concise sentence under 125 characters.**
-    - **GOOD Example:** "A before-photo of old casement windows with colonial grilles on a Salina, KS home, prior to a full window replacement."
+    - **GOOD Example:** "A two-story wall of Pella Lifestyle Series picture windows and a new patio door, shown after a full replacement project in Salina, KS."
 """
                 else:
                     alt_text_instructions = """
@@ -205,7 +206,6 @@ Your task is to analyze the image and generate a single, valid JSON object with 
                 alt_text = f"Image related to {keyword}"
                 
                 try:
-                    # Use a slightly higher temperature for the more creative prompts
                     temp = 0.4
                     response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
@@ -313,7 +313,7 @@ if st.session_state.processed_data:
                 else:
                     col1_comp, col2_comp = st.columns(2)
                     with col1_comp: st.image(original_img_compare, caption="Original")
-                    with col2_comp: st.image(compressed_img_.getvalue(), caption=f"WebP Q{compression_quality}")
+                    with col2_comp: st.image(compressed_img_compare, caption=f"WebP Q{compression_quality}")
 
                 if st.button("Close Comparison", key=f"close_compare_{idx_to_compare}"):
                     st.session_state.compare_index = None
