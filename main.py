@@ -76,7 +76,6 @@ service_type = st.sidebar.text_input("3. Service Type (Optional)", help="e.g., '
 product_type = st.sidebar.text_input("4. Product Type (Optional)", help="e.g., 'Pella casement windows'.")
 city_geo_target = st.sidebar.text_input("5. City / GEO Target (Optional)", help="e.g., 'Topeka, KS'.")
 project_number = st.sidebar.text_input("6. Project Number (Optional)", help="Appended to filenames (e.g., image-slug-PN123.webp).")
-# --- NEW FEATURE: Additional Context Field ---
 additional_context = st.sidebar.text_area("7. Additional Context (Optional)", help="Provide unique details like 'before photo' or 'removed old window grilles'. This will be used in the alt text.")
 compression_quality = st.sidebar.slider("8. WebP Compression Quality", 1, 100, 80, help="Adjust WebP quality. Higher = better quality, larger file.")
 
@@ -170,7 +169,7 @@ Your task is to analyze an image and generate a single, valid JSON object with `
                     instructions = """
 1.  **For `base_filename`**:
     - Create a concise filename focused on the physical subject. Use the **Product Type** and **Location**.
-    - **Do NOT include the Service Type or Additional Context**. The filename describes the 'what' and 'where', not the 'how' or 'why'.
+    - **Do NOT include the Service Type or Additional Context**. The filename describes the 'what' and 'where'.
     - **GOOD Example:** `lifestyle-series-wood-windows-salina-ks`
 
 2.  **For `alt_text`**:
@@ -179,15 +178,18 @@ Your task is to analyze an image and generate a single, valid JSON object with `
     - **GOOD Example:** "A before-photo showing the old casement windows on a home in Salina, KS, prior to a full window replacement."
 """
                 else:
+                    # REVISED instructions for when ONLY keyword is provided
                     instructions = """
 1.  **For `base_filename`**:
-    - **Analyze the image for its main visual subject** (e.g., 'bay window', 'tan siding').
-    - Create a filename from these visual details, then weave in the Primary Keyword. Do not just repeat the keyword.
+    - **Your first priority is to analyze the image for its main visual subject.** Identify 3-4 key nouns (e.g., 'bay-window', 'tan-siding', 'shingled-roof').
+    - **Build the filename primarily from these visual details.**
+    - After creating the visual filename, you may add one relevant term from the Primary Keyword if it enhances the description. Do not simply copy the keyword.
     - **GOOD Example (for keyword 'exterior windows'):** `tan-siding-bay-window-exterior`
+    - **BAD Example (just repeating keyword):** `lifestyle-series-wood-windows`
 
 2.  **For `alt_text`**:
-    - Construct a descriptive sentence that sounds natural and human-written.
-    - Accurately describe the image's visual details and incorporate the **Primary Keyword** in a conversational way.
+    - Construct a descriptive sentence that sounds natural and human-written, based on the image's visual content.
+    - After describing the image, incorporate the **Primary Keyword** in a conversational way.
     - **GOOD Example:** "A set of Pella Lifestyle Series wood windows installed on the bay of a tan house, with sunlight casting shadows and potted plants nearby."
 """
                 
@@ -206,7 +208,7 @@ Your task is to analyze an image and generate a single, valid JSON object with `
                 alt_text = f"Image related to {keyword}"
                 
                 try:
-                    temp = 0.3 if not has_optional_context else 0.2
+                    temp = 0.4 if not has_optional_context else 0.2
                     response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
