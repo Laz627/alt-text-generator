@@ -162,15 +162,16 @@ else:
                 # Alt Text Instructions
                 if has_alt_text_context:
                     alt_text_instructions = """
-    - Weave the context fields (Service Type, Product Type, Location, etc.) into a natural, human-sounding description of the image.
+    - Identify 2-3 key visual details and weave them together with the provided context (Service Type, Product Type, Location, etc.).
     - The final text **MUST be a single, concise sentence under 125 characters.**
-    - **GOOD Example:** "A before-photo of old casement windows on a Salina, KS home, prior to a full window replacement."
+    - **GOOD Example:** "A before-photo of old casement windows with colonial grilles on a Salina, KS home, prior to a full window replacement."
 """
                 else:
                     alt_text_instructions = """
-    - First, describe the image's visual content in a human-sounding way. Then, find a natural way to include the **Primary Keyword**.
+    - Identify 2-3 of the most important visual details in the image (e.g., window arrangement, door style, siding color).
+    - Combine these details into a descriptive, human-sounding sentence that also includes the **Primary Keyword**.
     - The final text **MUST be a single, concise sentence under 125 characters.**
-    - **GOOD Example:** "A sunlit bay window with dark trim on a tan house, featuring beautiful exterior home windows."
+    - **GOOD Example:** "Large picture windows above a three-panel sliding glass door on a home with tan siding, providing a modern exterior."
 """
                 # --- Assemble Final Prompt ---
                 prompt_text_for_api = f"""
@@ -205,8 +206,8 @@ Your task is to analyze the image and generate a single, valid JSON object with 
                 
                 try:
                     # Use a slightly higher temperature for the more creative prompts
-                    temp = 0.4 if not has_filename_context else 0.2
-                    response = client.chat.completions.create(model="gpt-4-turbo", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
+                    temp = 0.4
+                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
@@ -312,7 +313,7 @@ if st.session_state.processed_data:
                 else:
                     col1_comp, col2_comp = st.columns(2)
                     with col1_comp: st.image(original_img_compare, caption="Original")
-                    with col2_comp: st.image(compressed_img_compare, caption=f"WebP Q{compression_quality}")
+                    with col2_comp: st.image(compressed_img_.getvalue(), caption=f"WebP Q{compression_quality}")
 
                 if st.button("Close Comparison", key=f"close_compare_{idx_to_compare}"):
                     st.session_state.compare_index = None
