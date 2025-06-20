@@ -176,7 +176,7 @@ Your task is to analyze an image and generate a single, valid JSON object with `
                 alt_text = f"Image related to {keyword}"
                 
                 try:
-                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=0.3, response_format={"type": "json_object"})
+                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=0.4, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
