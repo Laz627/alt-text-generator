@@ -151,14 +151,17 @@ Your task is to analyze an image and generate a single, valid JSON object with `
 
 **CRITICAL INSTRUCTIONS:**
 
-1.  **`base_filename`**: Create a descriptive, hyphenated filename that includes key materials, product types, and the location from the context.
-    - *Example:* `wood-casement-windows-topeka-ks`
+1.  **For `base_filename`**:
+    - Create a concise, descriptive, hyphenated filename.
+    - It must focus on the physical subject, using the **Product Type** and **Location**.
+    - **Do NOT include the Service Type** in the filename. The filename describes the 'what' and 'where', not the 'how'.
+    - **GOOD Example:** `lifestyle-series-wood-windows-salina-ks`
+    - **BAD Example:** `lifestyle-series-wood-windows-window-replacement-salina-ks`
 
-2.  **`alt_text`**: Construct a descriptive sentence following these steps:
-    -   **Step 1 - Draft the core description:** Combine the visual information from the image with the provided context (Service Type, Product Type, Location).
-    -   **Step 2 - Final Polish:** Review and **rewrite** the drafted sentence to make it sound natural and human-written. It must be grammatically correct and conversational. The goal is to describe the image accurately to a person, not just to list keywords for a machine.
-    -   **GOOD (Natural):** "Three beautiful Pella wood casement windows on a residential dormer after a recent window replacement project in Topeka."
-    -   **BAD (Programmatic):** "Windows installed with Pella as part of a window replacement in Topeka."
+2.  **For `alt_text`**:
+    - Construct a descriptive sentence that sounds natural and human-written.
+    - It should accurately describe the image and incorporate the **Product Type**, **Service Type**, and **Location** in a conversational way.
+    - **GOOD Example:** "A new bay of Pella Lifestyle Series wood windows on a tan home in Salina, KS, after a complete window replacement."
 
 **IMPORTANT: Output ONLY the final, polished JSON object.**
 ```json
@@ -173,7 +176,7 @@ Your task is to analyze an image and generate a single, valid JSON object with `
                 alt_text = f"Image related to {keyword}"
                 
                 try:
-                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=0.3, response_format={"type": "json_object"})
+                    response = client.chat.completions.create(model="gpt-4-turbo", messages=messages, max_tokens=200, temperature=0.3, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
