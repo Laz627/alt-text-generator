@@ -142,7 +142,6 @@ else:
                 # --- DYNAMIC PROMPT LOGIC ---
                 has_optional_context = service_type or product_type or city_geo_target
                 
-                # Base prompt structure for both cases
                 prompt_template = """
 Your task is to analyze an image and generate a single, valid JSON object with `base_filename` and `alt_text`.
 
@@ -164,7 +163,6 @@ Your task is to analyze an image and generate a single, valid JSON object with `
 }}```
 """
                 if has_optional_context:
-                    # Instructions for when full context is provided
                     instructions = """
 1.  **For `base_filename`**:
     - Create a concise, descriptive filename focusing on the physical subject. Use the **Product Type** and **Location**.
@@ -178,13 +176,12 @@ Your task is to analyze an image and generate a single, valid JSON object with `
     - **GOOD Example:** "A new bay of Pella Lifestyle Series wood windows on a tan home in Salina, KS, after a complete window replacement."
 """
                 else:
-                    # Instructions for when ONLY keyword is provided
                     instructions = """
 1.  **For `base_filename`**:
     - **Analyze the image for its main visual subject** (e.g., 'bay window', 'tan siding', 'shingled roof').
     - Create a filename from these visual details first, then weave in the Primary Keyword if it fits. Do not just repeat the keyword.
-    - **GOOD Example (for a photo of a bay window and keyword 'exterior windows'):** `tan-siding-bay-window-exterior.webp`
-    - **BAD Example (just repeating the keyword):** `lifestyle-series-wood-windows.webp`
+    - **GOOD Example (for a photo of a bay window and keyword 'exterior windows'):** `tan-siding-bay-window-exterior`
+    - **BAD Example (just repeating the keyword):** `lifestyle-series-wood-windows`
 
 2.  **For `alt_text`**:
     - Construct a descriptive sentence that sounds natural and human-written.
@@ -206,13 +203,17 @@ Your task is to analyze an image and generate a single, valid JSON object with `
                 alt_text = f"Image related to {keyword}"
                 
                 try:
-                    # Use a slightly higher temperature for the more creative 'keyword-only' prompt
                     temp = 0.3 if not has_optional_context else 0.2
                     response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
                     alt_text = result.get("alt_text", f"Image of {keyword}")
+
+                    # --- FIX: Defensively remove 'webp' if the AI mistakenly adds it to the base name ---
+                    if base_filename_from_api.endswith('webp'):
+                        base_filename_from_api = base_filename_from_api[:-4]
+
                 except json.JSONDecodeError as json_e:
                     st.warning(f"⚠️ OpenAI response format error for image {idx+1}. Using defaults.")
                     temp_processing_errors.append(f"API JSON Parse Err {original_filename}: {json_e}")
