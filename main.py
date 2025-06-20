@@ -207,7 +207,7 @@ Your task is to analyze an image and generate a single, valid JSON object with `
                 
                 try:
                     # Use a slightly higher temperature for the more creative 'keyword-only' prompt
-                    temp = 0.4 if not has_optional_context else 0.3
+                    temp = 0.3 if not has_optional_context else 0.2
                     response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=temp, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
