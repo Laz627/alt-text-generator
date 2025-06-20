@@ -141,7 +141,7 @@ else:
 
                 # --- REVISED AND IMPROVED PROMPT ---
                 prompt_text_for_api = f"""
-Your task is to analyze the provided image and generate a single, valid JSON object for SEO purposes, based on the specific context I provide.
+Your task is to analyze an image and generate a single, valid JSON object for SEO, based on the context provided.
 
 **CONTEXTUAL DETAILS:**
 - Primary Keyword: '{keyword}'
@@ -150,14 +150,19 @@ Your task is to analyze the provided image and generate a single, valid JSON obj
 - Location: '{city_geo_target if city_geo_target else "Not provided"}'
 
 **CRITICAL INSTRUCTIONS:**
-1.  **`base_filename`**: Create a descriptive, hyphenated filename.
-    - It **MUST** incorporate the most important descriptive words from the context, such as materials (e.g., 'wood'), product types, and the location.
-    - Prioritize accuracy over being overly short.
-    - **Example of a good filename:** `wood-casement-windows-topeka-ks`
-2.  **`alt_text`**: Write a natural, descriptive sentence under 125 characters.
-    - You **MUST** naturally include the **Service Type** (e.g., '...as part of a window replacement...').
-    - Also integrate descriptive terms from the Product Type (like 'wood casement') and the Location.
-    - **Example of good alt text:** "A home's new wood casement windows after a window replacement project in Topeka, KS."
+
+1.  **For `base_filename`**:
+    - Create a descriptive, hyphenated filename.
+    - It **MUST** incorporate important descriptors from the context, such as materials (e.g., 'wood'), product types, and the location.
+    - **Example:** `wood-casement-windows-topeka-ks`
+
+2.  **For `alt_text`**:
+    - Write a single, natural, descriptive sentence under 125 characters.
+    - The **Product Type** should be the main subject of the sentence (e.g., "Pella Lifestyle Series wood windows...").
+    - The **Service Type** should provide context for the action (e.g., "...installed during a window replacement.").
+    - **AVOID** awkward phrasing like "windows installed with Pella". Frame the product as the object being installed.
+    - **GOOD EXAMPLE:** "New Pella Lifestyle Series wood casement windows installed on a home in Topeka, KS, during a recent window replacement project."
+    - **BAD EXAMPLE:** "Windows installed with Pella as part of a window replacement in Topeka."
 
 **IMPORTANT: Output ONLY the JSON object, with no other text, explanations, or markdown.**
 ```json
@@ -172,7 +177,7 @@ Your task is to analyze the provided image and generate a single, valid JSON obj
                 alt_text = f"Image related to {keyword}"
                 
                 try:
-                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=0.2, response_format={"type": "json_object"})
+                    response = client.chat.completions.create(model="gpt-4-turbo", messages=messages, max_tokens=200, temperature=0.2, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
@@ -264,7 +269,7 @@ if st.session_state.processed_data:
         idx_to_compare = st.session_state.compare_index
         item_to_compare = processed_data_display[idx_to_compare]
 
-        with st.container(border=True):
+        with st.container(border=_True_):
              st.subheader(f"Comparing: {item_to_compare.get('original_filename', 'Original Image')}")
              try:
                 original_img_compare = Image.open(BytesIO(item_to_compare["original_data"]))
