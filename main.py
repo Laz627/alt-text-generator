@@ -139,11 +139,11 @@ else:
                 openai_image_buffer = BytesIO(); image.save(openai_image_buffer, format="PNG")
                 base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
 
-                # --- REVISED AND IMPROVED PROMPT ---
+                # --- FINAL REVISION OF THE PROMPT ---
                 prompt_text_for_api = f"""
-Your task is to analyze an image and generate a single, valid JSON object for SEO, based on the context provided.
+Your task is to analyze an image and generate a single, valid JSON object with `base_filename` and `alt_text`.
 
-**CONTEXTUAL DETAILS:**
+**CONTEXTUAL DETAILS to incorporate:**
 - Primary Keyword: '{keyword}'
 - Service Type: '{service_type if service_type else "Not provided"}'
 - Product Type: '{product_type if product_type else "Not provided"}'
@@ -151,24 +151,20 @@ Your task is to analyze an image and generate a single, valid JSON object for SE
 
 **CRITICAL INSTRUCTIONS:**
 
-1.  **For `base_filename`**:
-    - Create a descriptive, hyphenated filename.
-    - It **MUST** incorporate important descriptors from the context, such as materials (e.g., 'wood'), product types, and the location.
-    - **Example:** `wood-casement-windows-topeka-ks`
+1.  **`base_filename`**: Create a descriptive, hyphenated filename that includes key materials, product types, and the location from the context.
+    - *Example:* `wood-casement-windows-topeka-ks`
 
-2.  **For `alt_text`**:
-    - Write a single, natural, descriptive sentence under 125 characters.
-    - The **Product Type** should be the main subject of the sentence (e.g., "Pella Lifestyle Series wood windows...").
-    - The **Service Type** should provide context for the action (e.g., "...installed during a window replacement.").
-    - **AVOID** awkward phrasing like "windows installed with Pella". Frame the product as the object being installed.
-    - **GOOD EXAMPLE:** "New Pella Lifestyle Series wood casement windows installed on a home in Topeka, KS, during a recent window replacement project."
-    - **BAD EXAMPLE:** "Windows installed with Pella as part of a window replacement in Topeka."
+2.  **`alt_text`**: Construct a descriptive sentence following these steps:
+    -   **Step 1 - Draft the core description:** Combine the visual information from the image with the provided context (Service Type, Product Type, Location).
+    -   **Step 2 - Final Polish:** Review and **rewrite** the drafted sentence to make it sound natural and human-written. It must be grammatically correct and conversational. The goal is to describe the image accurately to a person, not just to list keywords for a machine.
+    -   **GOOD (Natural):** "Three beautiful Pella wood casement windows on a residential dormer after a recent window replacement project in Topeka."
+    -   **BAD (Programmatic):** "Windows installed with Pella as part of a window replacement in Topeka."
 
-**IMPORTANT: Output ONLY the JSON object, with no other text, explanations, or markdown.**
+**IMPORTANT: Output ONLY the final, polished JSON object.**
 ```json
 {{
   "base_filename": "your-descriptive-hyphenated-name",
-  "alt_text": "Your descriptive alt text sentence."
+  "alt_text": "Your natural, human-sounding alt text."
 }}```
 """
                 messages = [{"role": "user", "content": [{"type": "text", "text": prompt_text_for_api}, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}]}]
@@ -177,7 +173,7 @@ Your task is to analyze an image and generate a single, valid JSON object for SE
                 alt_text = f"Image related to {keyword}"
                 
                 try:
-                    response = client.chat.completions.create(model="gpt-4.1", messages=messages, max_tokens=200, temperature=0.2, response_format={"type": "json_object"})
+                    response = client.chat.completions.create(model="gpt-4-turbo", messages=messages, max_tokens=200, temperature=0.3, response_format={"type": "json_object"})
                     output = response.choices[0].message.content.strip()
                     result = json.loads(output)
                     base_filename_from_api = result.get("base_filename", f"optimized-image-{idx+1}")
@@ -269,7 +265,7 @@ if st.session_state.processed_data:
         idx_to_compare = st.session_state.compare_index
         item_to_compare = processed_data_display[idx_to_compare]
 
-        with st.container(border=_True_):
+        with st.container(border=True):
              st.subheader(f"Comparing: {item_to_compare.get('original_filename', 'Original Image')}")
              try:
                 original_img_compare = Image.open(BytesIO(item_to_compare["original_data"]))
