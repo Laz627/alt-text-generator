@@ -27,21 +27,33 @@ def update_bulk_item(index, field_key_prefix):
     """Callback to update an item in the bulk processed data list."""
     widget_key = f"{field_key_prefix}_{index}"
     if widget_key in st.session_state:
-        st.session_state.bulk_processed_data[index][field_key_prefix] = st.session_state[widget_key]
+        # Before updating, sanitize the filename if that's the field being changed
+        if field_key_prefix == 'optimized_filename':
+            sanitized_value = sanitize_filename(st.session_state[widget_key])
+            st.session_state.bulk_processed_data[index][field_key_prefix] = sanitized_value
+        else:
+            st.session_state.bulk_processed_data[index][field_key_prefix] = st.session_state[widget_key]
 
 def update_single_item(field_to_update, widget_key):
     """Callback to update a field in the single processed item dictionary."""
     if widget_key in st.session_state and st.session_state.single_processed_item:
-        st.session_state.single_processed_item[field_to_update] = st.session_state[widget_key]
+        # Sanitize the filename if it's being updated
+        if field_to_update == 'optimized_filename':
+            sanitized_value = sanitize_filename(st.session_state[widget_key])
+            st.session_state.single_processed_item[field_to_update] = sanitized_value
+        else:
+            st.session_state.single_processed_item[field_to_update] = st.session_state[widget_key]
 
-# --- Helper Functions (Unchanged) ---
+
+# --- Helper Functions ---
 def sanitize_filename(filename):
-    """Sanitizes a string to be a valid filename."""
-    sanitized = filename.lower().replace(' ', '-')
-    sanitized = re.sub(r'[^a-z0-9\-.]', '', sanitized) # Allow dots for extension
-    sanitized = re.sub(r'-+', '-', sanitized)
-    sanitized = sanitized.strip('-')
-    return sanitized
+    """Sanitizes a string to be a valid filename, allowing the final dot for extension."""
+    base, ext = os.path.splitext(filename)
+    sanitized_base = base.lower().replace(' ', '-')
+    sanitized_base = re.sub(r'[^a-z0-9\-]', '', sanitized_base)
+    sanitized_base = re.sub(r'-+', '-', sanitized_base)
+    sanitized_base = sanitized_base.strip('-')
+    return f"{sanitized_base}{ext}"
 
 def truncate_filename(filename, max_length=80):
     """Truncates a filename to a max length, preserving the extension."""
@@ -58,24 +70,29 @@ def get_image_from_source(source):
     is_url = isinstance(source, str)
     try:
         if is_url:
-            response = requests.get(source, timeout=15)
-            response.raise_for_status()
-            if 'image' not in response.headers.get('Content-Type', '').lower():
-                raise ValueError("URL does not point to a valid image type.")
+            response = requests.get(source, timeout=15); response.raise_for_status()
+            if 'image' not in response.headers.get('Content-Type', '').lower(): raise ValueError("URL not valid image type.")
             original_data = response.content
-            image = Image.open(BytesIO(original_data))
-            original_filename = source.split('/')[-1].split('?')[0]
-        else: # UploadedFile object
-            original_data = source.getvalue()
-            source.seek(0)
-            if source.type not in ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/bmp', 'image/avif']:
-                raise ValueError(f"Unsupported file format: {source.type}")
-            image = Image.open(source)
-            original_filename = source.name
+            image = Image.open(BytesIO(original_data)); original_filename = source.split('/')[-1].split('?')[0]
+        else:
+            original_data = source.getvalue(); source.seek(0)
+            if source.type not in ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']: raise ValueError(f"Unsupported format: {source.type}")
+            image = Image.open(source); original_filename = source.name
     except requests.exceptions.RequestException as e: error = f"Error fetching URL {source}: {e}"
     except ValueError as e: error = f"Error processing {'URL' if is_url else 'file'} {source if is_url else source.name}: {e}"
-    except Exception as e: error = f"An unexpected error occurred with {'URL' if is_url else 'file'} {source if is_url else source.name}: {e}"
+    except Exception as e: error = f"Unexpected error with {'URL' if is_url else 'file'} {source if is_url else source.name}: {e}"
     return image, original_filename, error, original_data
+
+# --- THIS FUNCTION WAS RE-ADDED TO FIX THE NameError ---
+def format_size(size_bytes):
+    """Formats bytes into a human-readable string (KB or MB)."""
+    if size_bytes is None or size_bytes < 0: return "N/A"
+    if size_bytes == 0: return "0 B"
+    size_kb = size_bytes / 1024
+    if size_kb < 1024:
+        return f"{size_kb:.1f} KB"
+    size_mb = size_kb / 1024
+    return f"{size_mb:.1f} MB"
 
 def process_image(source, client, config, existing_filenames=None):
     """Processes a single image: fetches, compresses, and gets AI metadata."""
@@ -89,14 +106,12 @@ def process_image(source, client, config, existing_filenames=None):
 
     try:
         original_size_bytes = len(original_image_data)
-        compressed_buffer = BytesIO()
-        image.save(compressed_buffer, format="WEBP", quality=config['compression_quality'])
+        compressed_buffer = BytesIO(); image.save(compressed_buffer, format="WEBP", quality=config['compression_quality'])
         compressed_image_data = compressed_buffer.getvalue()
         compressed_size_bytes = len(compressed_image_data)
         savings_percentage = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100 if original_size_bytes > 0 else 0.0
 
-        openai_image_buffer = BytesIO()
-        image.save(openai_image_buffer, format="PNG")
+        openai_image_buffer = BytesIO(); image.save(openai_image_buffer, format="PNG")
         base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
 
         has_filename_context = config['product_type'] or config['city_geo_target']
@@ -133,7 +148,7 @@ def process_image(source, client, config, existing_filenames=None):
             if base_filename_from_api.endswith(('.webp', '.png', '.jpg')): base_filename_from_api = os.path.splitext(base_filename_from_api)[0]
         except Exception as e: api_error = f"OpenAI API/JSON Err: {e}"
 
-        sanitized_base_name = sanitize_filename(base_filename_from_api)
+        sanitized_base_name = sanitize_filename(base_filename_from_api).rsplit('.', 1)[0]
         filename_core = sanitized_base_name
         if config['sanitized_project_number']: filename_core += f"-{config['sanitized_project_number']}"
         final_filename_with_ext = truncate_filename(f"{filename_core}.webp")
@@ -233,7 +248,7 @@ with tab1:
             zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for item in st.session_state.bulk_processed_data:
-                    zf.writestr(sanitize_filename(item["optimized_filename"]), item["compressed_data"])
+                    zf.writestr(item["optimized_filename"], item["compressed_data"])
             st.download_button("📦 Download Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip')
 
         st.header("✏️ Edit & Compare Images")
@@ -303,7 +318,7 @@ with tab2:
             st.metric(label="Compressed Size", value=format_size(item['compressed_size_bytes']), delta=f"-{item['savings_percentage']:.1f}% savings", delta_color="normal")
             st.download_button(
                 label="📥 Download Optimized Image (.webp)", data=item['compressed_data'],
-                file_name=sanitize_filename(item['optimized_filename']), mime='image/webp', key='single_download_button'
+                file_name=item['optimized_filename'], mime='image/webp', key='single_download_button'
             )
         with col2_res:
             st.subheader("Image Preview")
