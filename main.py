@@ -12,24 +12,28 @@ import time
 import zipfile
 import traceback
 
-# Ensure streamlit-image-comparison is installed (added to requirements.txt)
+# Ensure streamlit-image-comparison is installed
 try:
     from streamlit_image_comparison import image_comparison
     image_comparison_available = True
 except ModuleNotFoundError:
-    image_comparison_available = False # Handle if not installed
+    image_comparison_available = False
 
 # --- Configuration & Page Setup ---
 st.set_page_config(layout="wide", page_title="Image SEO Optimizer")
 
 # --- Helper Functions ---
 def sanitize_filename(filename):
-    """Sanitizes a string to be a valid filename."""
-    sanitized = filename.lower().replace(' ', '-')
-    sanitized = re.sub(r'[^a-z0-9\-]', '', sanitized)
-    sanitized = re.sub(r'-+', '-', sanitized)
-    sanitized = sanitized.strip('-')
-    return sanitized
+    """Sanitizes a string to be a valid filename, preserving the extension."""
+    base, ext = os.path.splitext(filename)
+    sanitized_base = base.lower().replace(' ', '-')
+    sanitized_base = re.sub(r'[^a-z0-9\-]', '', sanitized_base)
+    sanitized_base = re.sub(r'-+', '-', sanitized_base)
+    sanitized_base = sanitized_base.strip('-')
+    # Ensure there's an extension, default to .webp if missing
+    if not ext:
+        ext = '.webp'
+    return f"{sanitized_base}{ext}"
 
 def truncate_filename(filename, max_length=80):
     """Truncates a filename to a max length, preserving the extension."""
@@ -60,12 +64,8 @@ def get_image_from_source(source):
                 raise ValueError(f"Unsupported file format: {source.type}")
             image = Image.open(source)
             original_filename = source.name
-    except requests.exceptions.RequestException as e:
-        error = f"Error fetching URL {source}: {e}"
-    except ValueError as e:
-        error = f"Error processing {'URL' if is_url else 'file'} {source if is_url else source.name}: {e}"
     except Exception as e:
-        error = f"An unexpected error occurred with {'URL' if is_url else 'file'} {source if is_url else source.name}: {e}"
+        error = f"Error processing {'URL' if is_url else 'file'}: {e}"
     return image, original_filename, error, original_data
 
 def format_size(size_bytes):
@@ -161,21 +161,22 @@ Your task is to analyze the image and generate a single, valid JSON object with 
             alt_text = result.get("alt_text", f"Image of {config['keyword']}")
             if base_filename_from_api.endswith(('.webp', '.png', '.jpg')):
                  base_filename_from_api = os.path.splitext(base_filename_from_api)[0]
+        except Exception as api_e:
+            api_error = f"OpenAI API Err: {api_e}"
 
-        except json.JSONDecodeError as json_e: api_error = f"API JSON Parse Err: {json_e}"
-        except Exception as api_e: api_error = f"OpenAI API Err: {api_e}"
-
-        sanitized_base_name = sanitize_filename(base_filename_from_api)
+        sanitized_base_name = sanitize_filename(base_filename_from_api).replace('.webp', '')
         filename_core = sanitized_base_name
         if config['sanitized_project_number']: filename_core += f"-{config['sanitized_project_number']}"
         final_filename_with_ext = truncate_filename(f"{filename_core}.webp")
 
-        unique_filename = final_filename_with_ext; counter = 1
+        unique_filename = final_filename_with_ext
+        counter = 1
         while unique_filename in existing_filenames:
             core_name_no_ext, ext = os.path.splitext(final_filename_with_ext)
             if counter > 1 and core_name_no_ext.endswith(f'-{counter-1}'):
                  core_name_no_ext = core_name_no_ext[:-len(f'-{counter-1}')]
-            unique_filename = f"{core_name_no_ext}-{counter}{ext}"; counter += 1
+            unique_filename = f"{core_name_no_ext}-{counter}{ext}"
+            counter += 1
         
         return {"status": "success", "original_filename": original_filename, "optimized_filename": unique_filename, "alt_text": alt_text, "original_size_bytes": original_size_bytes, "compressed_size_bytes": compressed_size_bytes, "savings_percentage": savings_percentage, "image_url": source if isinstance(source, str) else None, "compressed_data": compressed_image_data, "original_data": original_image_data, "api_error": api_error}
     except Exception as process_e:
@@ -198,8 +199,6 @@ compression_quality = st.sidebar.slider("8. WebP Compression Quality", 1, 100, 8
 sanitized_project_number = ""
 if project_number:
     sanitized_project_number = re.sub(r'[^a-zA-Z0-9\-]', '', project_number).strip('-')
-    if project_number != sanitized_project_number: st.sidebar.warning(f"PN sanitized: `{sanitized_project_number}`")
-    if not sanitized_project_number: st.sidebar.warning("Invalid PN after sanitization, not used.")
 config = {"keyword": keyword, "service_type": service_type, "product_type": product_type, "city_geo_target": city_geo_target, "project_number": project_number, "additional_context": additional_context, "compression_quality": compression_quality, "sanitized_project_number": sanitized_project_number}
 
 # --- Initialize Session State ---
@@ -208,16 +207,31 @@ if 'bulk_compare_index' not in st.session_state: st.session_state.bulk_compare_i
 if 'single_processed_item' not in st.session_state: st.session_state.single_processed_item = None
 if 'single_compare_active' not in st.session_state: st.session_state.single_compare_active = False
 
+# --- Callback Functions for Editing ---
+def update_bulk_filename(index):
+    new_filename = st.session_state[f"bulk_fn_{index}"]
+    st.session_state.bulk_processed_data[index]['optimized_filename'] = sanitize_filename(new_filename)
+
+def update_bulk_alt_text(index):
+    st.session_state.bulk_processed_data[index]['alt_text'] = st.session_state[f"bulk_alt_{index}"]
+
+def update_single_filename():
+    new_filename = st.session_state["single_fn_edit"]
+    st.session_state.single_processed_item['optimized_filename'] = sanitize_filename(new_filename)
+
+def update_single_alt_text():
+    st.session_state.single_processed_item['alt_text'] = st.session_state["single_alt_edit"]
+
 # --- Tabbed Interface ---
 tab1, tab2 = st.tabs(["Bulk Image Optimizer", "Singular Image Optimizer"])
 
 # --- BULK OPTIMIZER TAB ---
 with tab1:
     st.header("🖼️ Bulk Image Input (Max 20)")
-    col1, col2 = st.columns(2)
-    with col1:
+    col1_in, col2_in = st.columns(2)
+    with col1_in:
         uploaded_files = st.file_uploader("Upload Images", type=['png','jpg','jpeg','webp','gif','bmp','avif'], accept_multiple_files=True, help="Max 20 images.", key="bulk_uploader")
-    with col2:
+    with col2_in:
         image_urls_input = st.text_area("Or Enter Image URLs (one per line)", height=150, help="Direct image URLs.", key="bulk_urls")
     
     image_sources_input = []
@@ -249,8 +263,7 @@ with tab1:
                 else:
                     temp_skipped_files.append(f"{result['original_filename']} ({result['message']})")
                 time.sleep(0.7)
-            progress_bar.empty()
-            end_time = time.time()
+            progress_bar.empty(); end_time = time.time()
             st.session_state.bulk_processed_data = temp_processed_data
             st.success(f"✅ Optimization complete: {len(temp_processed_data)} items processed in {end_time - start_time:.2f}s!")
             if temp_skipped_files:
@@ -258,45 +271,50 @@ with tab1:
                 for file_info in temp_skipped_files: st.warning(f"- {file_info}")
             st.rerun()
 
-    # --- Bulk Results Display Section ---
     if st.session_state.bulk_processed_data:
         st.header("📊 Results & Downloads")
-        display_df_data = [{"Original Filename": item["original_filename"], "Optimized Filename": item["optimized_filename"], "Alt Text": item["alt_text"], "Original Size": format_size(item["original_size_bytes"]), "Compressed Size": format_size(item["compressed_size_bytes"]), "Savings (%)": f"{item['savings_percentage']:.1f}%", "Original Source": item["image_url"] if item["image_url"] else "Uploaded"} for item in st.session_state.bulk_processed_data]
-        st.dataframe(pd.DataFrame(display_df_data))
+        display_df_data = [{"Optimized Filename": item["optimized_filename"], "Alt Text": item["alt_text"]} for item in st.session_state.bulk_processed_data]
+        st.dataframe(pd.DataFrame(display_df_data), use_container_width=True)
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
-            csv = pd.DataFrame(display_df_data).to_csv(index=False).encode('utf-8'); st.download_button("📥 Download CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
+            csv = pd.DataFrame(display_df_data).to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download CSV Summary", csv, 'image_seo_summary.csv', 'text/csv', key='csv_download')
         with col_dl2:
-            zip_buffer = BytesIO();
+            zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for item in st.session_state.bulk_processed_data: zf.writestr(item["optimized_filename"], item["compressed_data"])
+                for item in st.session_state.bulk_processed_data:
+                    zf.writestr(item["optimized_filename"], item["compressed_data"])
             st.download_button("📦 Download Optimized Images (.zip)", zip_buffer.getvalue(), 'optimized_images.zip', 'application/zip', key='zip_download')
 
-        st.header("🖼️ Optimized Image Details & Comparison")
+        st.header("🖼️ Edit Details & Compare")
         for i_disp, item in enumerate(st.session_state.bulk_processed_data):
-            with st.expander(f"Image {i_disp+1}: {item.get('optimized_filename', 'N/A')}", expanded=(st.session_state.bulk_compare_index == i_disp)):
-                st.markdown(f"**Optimized Filename:** `{item.get('optimized_filename', 'N/A')}`")
-                st.markdown(f"**Alt Text:**"); st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=75, key=f"alt_{i_disp}", disabled=True)
-
-                if st.session_state.get('bulk_compare_index') == i_disp:
+            is_expanded = st.session_state.bulk_compare_index == i_disp
+            with st.expander(f"Image {i_disp+1}: {item.get('original_filename', 'N/A')}", expanded=is_expanded):
+                with st.container(border=True):
+                    col1_exp, col2_exp = st.columns([2, 1])
+                    with col1_exp:
+                        st.text_input("Optimized Filename", value=item.get('optimized_filename', 'N/A'), key=f"bulk_fn_{i_disp}", on_change=update_bulk_filename, args=(i_disp,))
+                        st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=100, key=f"bulk_alt_{i_disp}", on_change=update_bulk_alt_text, args=(i_disp,))
+                    with col2_exp:
+                        st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview")
+                    
                     st.markdown("---")
-                    st.subheader(f"Comparing: {item.get('original_filename', 'Original Image')}")
-                    try:
-                        original_img = Image.open(BytesIO(item["original_data"]))
-                        compressed_img = Image.open(BytesIO(item["compressed_data"]))
-                        image_comparison(img1=original_img, img2=compressed_img, label1="Original", label2=f"WebP Q{compression_quality}")
-                        if st.button("Close Comparison", key=f"close_compare_{i_disp}"):
-                            st.session_state.bulk_compare_index = None
-                            st.rerun()
-                    except Exception as compare_err:
-                        st.error(f"Could not load images for comparison: {compare_err}")
-                else:
-                    if image_comparison_available and item.get('original_data') and item.get('compressed_data'):
+                    
+                    if is_expanded:
+                        st.subheader(f"Comparing: {item.get('original_filename', 'Original Image')}")
+                        try:
+                            original_img = Image.open(BytesIO(item["original_data"]))
+                            compressed_img = Image.open(BytesIO(item["compressed_data"]))
+                            image_comparison(img1=original_img, img2=compressed_img, label1="Original", label2=f"WebP Q{compression_quality}")
+                            if st.button("Close Comparison", key=f"close_compare_{i_disp}"):
+                                st.session_state.bulk_compare_index = None
+                                st.rerun()
+                        except Exception as compare_err:
+                            st.error(f"Could not load images for comparison: {compare_err}")
+                    elif image_comparison_available and item.get('original_data'):
                         if st.button("Compare Original vs. Compressed", key=f"compare_btn_{i_disp}"):
                             st.session_state.bulk_compare_index = i_disp
                             st.rerun()
-                    elif item.get('compressed_data'):
-                        st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview", width=250)
 
 # --- SINGULAR OPTIMIZER TAB ---
 with tab2:
@@ -325,40 +343,38 @@ with tab2:
                 else:
                     st.error(f"❌ Error: {result['message']}")
             st.rerun()
-            
-    # --- Singular Result Display ---
+    
     if st.session_state.get('single_processed_item'):
         item = st.session_state.single_processed_item
         st.header("📊 Result & Download")
-        
-        st.markdown(f"**Original Filename:** `{item['original_filename']}`")
-        st.markdown(f"**Optimized Filename:** `{item['optimized_filename']}`")
-        st.text_area("Generated Alt Text", value=item['alt_text'], height=100, disabled=True, key="single_alt_text")
-        
-        metric_col1, metric_col2, metric_col3 = st.columns(3)
-        metric_col1.metric(label="Original Size", value=format_size(item['original_size_bytes']))
-        metric_col2.metric(label="Compressed Size", value=format_size(item['compressed_size_bytes']))
-        metric_col3.metric(label="Savings", value=f"{item['savings_percentage']:.1f}%")
-        
-        st.download_button(label="📥 Download Optimized Image (.webp)", data=item['compressed_data'], file_name=item['optimized_filename'], mime='image/webp', key='single_download_button')
-        st.divider()
+        with st.container(border=True):
+            st.markdown(f"**Original Filename:** `{item['original_filename']}`")
+            st.text_input("Optimized Filename", value=item.get('optimized_filename', 'N/A'), key="single_fn_edit", on_change=update_single_filename)
+            st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=100, key="single_alt_edit", on_change=update_single_alt_text)
+            
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
+            metric_col1.metric(label="Original Size", value=format_size(item['original_size_bytes']))
+            metric_col2.metric(label="Compressed Size", value=format_size(item['compressed_size_bytes']))
+            metric_col3.metric(label="Savings", value=f"{item['savings_percentage']:.1f}%")
+            
+            st.download_button(label="📥 Download Optimized Image (.webp)", data=item['compressed_data'], file_name=item['optimized_filename'], mime='image/webp', key='single_download_button')
+            st.divider()
 
-        st.subheader("Image Preview & Comparison")
-        if st.session_state.get('single_compare_active'):
-             try:
-                original_img = Image.open(BytesIO(item["original_data"]))
-                compressed_img = Image.open(BytesIO(item["compressed_data"]))
-                image_comparison(img1=original_img, img2=compressed_img, label1="Original", label2=f"WebP Q{compression_quality}")
-                if st.button("Close Comparison", key="single_close_compare"):
-                     st.session_state.single_compare_active = False
-                     st.rerun()
-             except Exception:
-                 st.error("Could not load images for comparison.")
+            st.subheader("Image Preview & Comparison")
+            if st.session_state.get('single_compare_active'):
+                 try:
+                    original_img = Image.open(BytesIO(item["original_data"]))
+                    compressed_img = Image.open(BytesIO(item["compressed_data"]))
+                    image_comparison(img1=original_img, img2=compressed_img, label1="Original", label2=f"WebP Q{compression_quality}")
+                    if st.button("Close Comparison", key="single_close_compare"):
+                         st.session_state.single_compare_active = False
+                         st.rerun()
+                 except Exception:
+                     st.error("Could not load images for comparison.")
+            elif image_comparison_available and item.get('original_data'):
                  st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview")
-        elif image_comparison_available:
-             st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview")
-             if st.button("Compare Original vs. Compressed", key="single_compare_btn"):
-                 st.session_state.single_compare_active = True
-                 st.rerun()
-        else:
-            st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview (Comparison tool not available)")
+                 if st.button("Compare Original vs. Compressed", key="single_compare_btn"):
+                     st.session_state.single_compare_active = True
+                     st.rerun()
+            else:
+                st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview (Comparison tool not available)")
