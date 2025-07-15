@@ -174,15 +174,9 @@ def process_image(source, client, config, existing_filenames=None):
 
     try:
         original_size_bytes = len(original_image_data)
-        
-        # 1. Compress the image
         compressed_image_data, compressed_size_bytes = _compress_image(image, config['compression_quality'])
         savings_percentage = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100 if original_size_bytes > 0 else 0.0
-
-        # 2. Get AI metadata
         base_filename_from_api, alt_text, api_error = _generate_ai_metadata(image, client, config)
-        
-        # 3. Finalize the filename
         unique_filename = _finalize_filename(base_filename_from_api, config['sanitized_project_number'], existing_filenames)
         
         return {
@@ -303,24 +297,18 @@ with tab1:
         reoptimize_cols = st.columns([3, 1])
         with reoptimize_cols[1]:
             if st.button("🔄 Re-optimize Selected", use_container_width=True):
-                selected_options = {i: st.session_state.get(f"reoptimize_option_{i}", "None") for i, _ in enumerate(st.session_state.bulk_processed_data)}
-                if all(v == "None" for v in selected_options.values()):
+                selected_options = {i: st.session_state.get(f"reoptimize_option_{i}", "none") for i, _ in enumerate(st.session_state.bulk_processed_data)}
+                if all(v == "none" for v in selected_options.values()):
                     st.warning("Please select an optimization action for at least one image.")
                 else:
                     client = OpenAI(api_key=api_key)
-                    # Pass 1: Collect filenames that will NOT be changed to handle uniqueness correctly.
-                    existing_filenames = set()
-                    for i, item in enumerate(st.session_state.bulk_processed_data):
-                        option = selected_options.get(i)
-                        if option not in ["regen_text", "regen_all"]:
-                            existing_filenames.add(item['optimized_filename'])
-
+                    existing_filenames = {item['optimized_filename'] for i, item in enumerate(st.session_state.bulk_processed_data) if selected_options.get(i) not in ["regen_text", "regen_all"]}
                     updated_data = st.session_state.bulk_processed_data.copy()
+                    
                     with st.spinner("Re-optimizing selected images..."):
                         for i, item in enumerate(updated_data):
                             option = selected_options.get(i)
-                            if option == "None": continue
-
+                            if option == "none": continue
                             try:
                                 image = Image.open(BytesIO(item['original_data']))
                                 if option in ["regen_text", "regen_all"]:
@@ -343,17 +331,21 @@ with tab1:
                     st.success("Re-optimization complete!")
                     time.sleep(1)
                     st.rerun()
+        
+        # --- CORRECTED: Moved map definition outside the loop ---
+        reoptimize_options_map = {'none': 'None', 'regen_text': 'Re-gen Text', 'recompress': 'Re-compress', 'regen_all': 'Re-gen All'}
 
         for i_disp, item in enumerate(st.session_state.bulk_processed_data):
             is_expanded = st.session_state.bulk_compare_index == i_disp
             with st.expander(f"Image {i_disp+1}: {item.get('original_filename', 'N/A')}", expanded=is_expanded):
                 with st.container(border=True):
+                    # --- CORRECTED: Radio button now stores a simple string key ---
                     st.radio(
                         "Re-optimization Action:",
-                        options=[('None', 'None'), ('Re-gen Text', 'regen_text'), ('Re-compress', 'recompress'), ('Regen All', 'regen_all')],
+                        options=list(reoptimize_options_map.keys()),
                         key=f"reoptimize_option_{i_disp}",
                         horizontal=True,
-                        format_func=lambda x: x[0],
+                        format_func=reoptimize_options_map.get,
                         index=0
                     )
                     st.markdown("---")
