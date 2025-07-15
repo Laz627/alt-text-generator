@@ -77,24 +77,21 @@ def format_size(size_bytes):
     size_mb = size_kb / 1024
     return f"{size_mb:.1f} MB"
 
-def _perform_optimization(image, original_filename, original_image_data, source_url, client, config, existing_filenames):
-    """Internal function to perform the actual image processing."""
-    try:
-        original_size_bytes = len(original_image_data)
-        compressed_buffer = BytesIO()
-        image.save(compressed_buffer, format="WEBP", quality=config['compression_quality'])
-        compressed_image_data = compressed_buffer.getvalue()
-        compressed_size_bytes = len(compressed_image_data)
-        savings_percentage = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100 if original_size_bytes > 0 else 0.0
+def _compress_image(image, quality):
+    """Compresses a PIL image to WebP format."""
+    compressed_buffer = BytesIO()
+    image.save(compressed_buffer, format="WEBP", quality=quality)
+    compressed_image_data = compressed_buffer.getvalue()
+    return compressed_image_data, len(compressed_image_data)
 
-        openai_image_buffer = BytesIO()
-        image.save(openai_image_buffer, format="PNG")
-        base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
-
-        has_filename_context = config['product_type'] or config['city_geo_target']
-        has_alt_text_context = config['service_type'] or config['product_type'] or config['city_geo_target'] or config['additional_context']
-        
-        filename_instructions = """
+def _generate_ai_metadata(image, client, config):
+    """Generates filename and alt text using OpenAI API."""
+    openai_image_buffer = BytesIO()
+    image.save(openai_image_buffer, format="PNG")
+    base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
+    has_filename_context = config['product_type'] or config['city_geo_target']
+    has_alt_text_context = config['service_type'] or config['product_type'] or config['city_geo_target'] or config['additional_context']
+    filename_instructions = """
 - Use the **Product Type** as the primary basis for the filename.
 - Enhance it with specific nouns from the **Primary Keyword** if they add necessary detail (e.g., 'patio-door').
 - Include the **Location**. Do **NOT** include the Service Type or Additional Context.
@@ -104,7 +101,7 @@ def _perform_optimization(image, original_filename, original_image_data, source_
 - Build the filename **primarily from these visual details**.
 - **GOOD Example:** `tan-siding-bay-window-exterior`
 """
-        alt_text_instructions = """
+    alt_text_instructions = """
 - Tell a short, descriptive story about the image. Start with the main visual subject, then weave in the context from the background information.
 - The final text **MUST be a single, concise sentence under 125 characters.**
 - **GOOD Example:** "A two-story wall of Pella Lifestyle Series picture windows and a new patio door, shown after a full replacement project in Salina, KS."
@@ -114,22 +111,19 @@ def _perform_optimization(image, original_filename, original_image_data, source_
 - The final text **MUST be a single, concise sentence under 125 characters.**
 - **GOOD Example:** "Large picture windows above a three-panel sliding glass door on a home with tan siding, providing a modern exterior."
 """
-        prompt_text_for_api = f"""
+    prompt_text_for_api = f"""
 Your task is to analyze the image and generate a single, valid JSON object with `base_filename` and `alt_text`.
-
 **BACKGROUND INFORMATION:**
 - Primary Keyword: '{config['keyword']}'
 - Service Type: '{config['service_type'] or "Not provided"}'
 - Product Type: '{config['product_type'] or "Not provided"}'
 - Location: '{config['city_geo_target'] or "Not provided"}'
 - Additional Project Context: '{config['additional_context'] or "Not provided"}'
-
 **YOUR INSTRUCTIONS:**
 1.  **For `base_filename`**:
 {filename_instructions}
 2.  **For `alt_text`**:
 {alt_text_instructions}
-
 **IMPORTANT: Output ONLY the final, polished JSON object.**
 ```json
 {{
@@ -137,54 +131,68 @@ Your task is to analyze the image and generate a single, valid JSON object with 
   "alt_text": "Your natural, human-sounding alt text."
 }}```
 """
-        messages = [{"role": "user", "content": [{"type": "text", "text": prompt_text_for_api}, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}]}]
-        
-        base_filename_from_api, alt_text, api_error = f"api-error-processing", f"Image related to {config['keyword']}", None
-        
-        try:
-            response = client.chat.completions.create(model="gpt-4o", messages=messages, max_tokens=200, temperature=0.4, response_format={"type": "json_object"})
-            output = response.choices[0].message.content.strip()
-            result = json.loads(output)
-            base_filename_from_api = result.get("base_filename", f"optimized-image-{original_filename}")
-            alt_text = result.get("alt_text", f"Image of {config['keyword']}")
-            if base_filename_from_api.endswith(('.webp', '.png', '.jpg')):
-                 base_filename_from_api = os.path.splitext(base_filename_from_api)[0]
-        except Exception as api_e:
-            api_error = f"OpenAI API Err: {api_e}"
+    messages = [{"role": "user", "content": [{"type": "text", "text": prompt_text_for_api}, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}]}]
+    base_filename_from_api, alt_text, api_error = f"api-error-processing", f"Image related to {config['keyword']}", None
+    try:
+        response = client.chat.completions.create(model="gpt-4o", messages=messages, max_tokens=200, temperature=0.4, response_format={"type": "json_object"})
+        output = response.choices[0].message.content.strip()
+        result = json.loads(output)
+        base_filename_from_api = result.get("base_filename", f"optimized-image-fallback")
+        alt_text = result.get("alt_text", f"Image of {config['keyword']}")
+        if base_filename_from_api.endswith(('.webp', '.png', '.jpg')):
+             base_filename_from_api = os.path.splitext(base_filename_from_api)[0]
+    except Exception as api_e:
+        api_error = f"OpenAI API Err: {api_e}"
+    return base_filename_from_api, alt_text, api_error
 
-        sanitized_base_name = sanitize_filename(base_filename_from_api).replace('.webp', '')
-        filename_core = sanitized_base_name
-        if config['sanitized_project_number']: filename_core += f"-{config['sanitized_project_number']}"
-        final_filename_with_ext = truncate_filename(f"{filename_core}.webp")
-
-        unique_filename = final_filename_with_ext
-        counter = 1
-        while unique_filename in existing_filenames:
-            core_name_no_ext, ext = os.path.splitext(final_filename_with_ext)
-            if counter > 1 and core_name_no_ext.endswith(f'-{counter-1}'):
-                 core_name_no_ext = core_name_no_ext[:-len(f'-{counter-1}')]
-            unique_filename = f"{core_name_no_ext}-{counter}{ext}"
-            counter += 1
-        
-        return {"status": "success", "original_filename": original_filename, "optimized_filename": unique_filename, "alt_text": alt_text, "original_size_bytes": original_size_bytes, "compressed_size_bytes": compressed_size_bytes, "savings_percentage": savings_percentage, "image_url": source_url, "compressed_data": compressed_image_data, "original_data": original_image_data, "api_error": api_error}
-    except Exception as process_e:
-         return {"status": "error", "message": f"Error during processing: {process_e}", "original_filename": original_filename}
+def _finalize_filename(base_name, proj_num_sanitized, existing_filenames):
+    """Takes a base name and creates a final, unique, sanitized filename."""
+    sanitized_base_name = sanitize_filename(base_name).replace('.webp', '')
+    filename_core = sanitized_base_name
+    if proj_num_sanitized:
+        filename_core += f"-{proj_num_sanitized}"
+    final_filename_with_ext = truncate_filename(f"{filename_core}.webp")
+    
+    unique_filename = final_filename_with_ext
+    counter = 1
+    while unique_filename in existing_filenames:
+        core_name_no_ext, ext = os.path.splitext(final_filename_with_ext)
+        if counter > 1 and core_name_no_ext.endswith(f'-{counter-1}'):
+             core_name_no_ext = core_name_no_ext[:-len(f'-{counter-1}')]
+        unique_filename = f"{core_name_no_ext}-{counter}{ext}"
+        counter += 1
+    return unique_filename
 
 def process_image(source, client, config, existing_filenames=None):
     """Processes a single image: fetches, compresses, and gets AI metadata."""
-    if existing_filenames is None:
-        existing_filenames = set()
-
+    if existing_filenames is None: existing_filenames = set()
     image, original_filename, error, original_image_data = get_image_from_source(source)
     source_identifier = source if isinstance(source, str) else source.name
 
-    if error:
-        return {"status": "error", "message": error, "original_filename": source_identifier}
-    if not image or not original_filename or original_image_data is None:
-        return {"status": "error", "message": "Failed to load image data.", "original_filename": source_identifier}
+    if error: return {"status": "error", "message": error, "original_filename": source_identifier}
+    if not image or not original_filename or original_image_data is None: return {"status": "error", "message": "Failed to load image data.", "original_filename": source_identifier}
 
-    source_url = source if isinstance(source, str) else None
-    return _perform_optimization(image, original_filename, original_image_data, source_url, client, config, existing_filenames)
+    try:
+        original_size_bytes = len(original_image_data)
+        
+        # 1. Compress the image
+        compressed_image_data, compressed_size_bytes = _compress_image(image, config['compression_quality'])
+        savings_percentage = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100 if original_size_bytes > 0 else 0.0
+
+        # 2. Get AI metadata
+        base_filename_from_api, alt_text, api_error = _generate_ai_metadata(image, client, config)
+        
+        # 3. Finalize the filename
+        unique_filename = _finalize_filename(base_filename_from_api, config['sanitized_project_number'], existing_filenames)
+        
+        return {
+            "status": "success", "original_filename": original_filename, "optimized_filename": unique_filename,
+            "alt_text": alt_text, "original_size_bytes": original_size_bytes, "compressed_size_bytes": compressed_size_bytes,
+            "savings_percentage": savings_percentage, "image_url": source if isinstance(source, str) else None,
+            "compressed_data": compressed_image_data, "original_data": original_image_data, "api_error": api_error
+        }
+    except Exception as process_e:
+         return {"status": "error", "message": f"Error during processing: {process_e}", "original_filename": original_filename}
 
 # --- Main App UI ---
 st.title("Image SEO Optimizer")
@@ -292,63 +300,75 @@ with tab1:
 
         st.header("🔄 Edit, Compare & Re-optimize")
         
-        # --- Re-optimization UI ---
         reoptimize_cols = st.columns([3, 1])
         with reoptimize_cols[1]:
             if st.button("🔄 Re-optimize Selected", use_container_width=True):
-                if not any(st.session_state.get(f"reoptimize_cb_{i}", False) for i, _ in enumerate(st.session_state.bulk_processed_data)):
-                    st.warning("No images selected for re-optimization.")
+                selected_options = {i: st.session_state.get(f"reoptimize_option_{i}", "None") for i, _ in enumerate(st.session_state.bulk_processed_data)}
+                if all(v == "None" for v in selected_options.values()):
+                    st.warning("Please select an optimization action for at least one image.")
                 else:
                     client = OpenAI(api_key=api_key)
-                    updated_processed_data = []
-                    existing_filenames = {item['optimized_filename'] for i, item in enumerate(st.session_state.bulk_processed_data) if not st.session_state.get(f"reoptimize_cb_{i}")}
-                    
+                    # Pass 1: Collect filenames that will NOT be changed to handle uniqueness correctly.
+                    existing_filenames = set()
+                    for i, item in enumerate(st.session_state.bulk_processed_data):
+                        option = selected_options.get(i)
+                        if option not in ["regen_text", "regen_all"]:
+                            existing_filenames.add(item['optimized_filename'])
+
+                    updated_data = st.session_state.bulk_processed_data.copy()
                     with st.spinner("Re-optimizing selected images..."):
-                        for i, item in enumerate(st.session_state.bulk_processed_data):
-                            if st.session_state.get(f"reoptimize_cb_{i}"):
-                                try:
-                                    image = Image.open(BytesIO(item['original_data']))
-                                    result = _perform_optimization(image, item['original_filename'], item['original_data'], item.get('image_url'), client, config, existing_filenames)
-                                    if result['status'] == 'success':
-                                        existing_filenames.add(result['optimized_filename'])
-                                        updated_processed_data.append(result)
-                                        if result.get('api_error'): st.warning(f"⚠️ OpenAI issue for {result['original_filename']}: {result['api_error']}. Defaults used.")
-                                    else:
-                                        st.error(f"Failed to re-optimize {item['original_filename']}: {result['message']}")
-                                        updated_processed_data.append(item) # Keep old item on failure
-                                except Exception as e:
-                                    st.error(f"A critical error occurred re-optimizing {item['original_filename']}: {e}")
-                                    updated_processed_data.append(item)
-                            else:
-                                updated_processed_data.append(item)
+                        for i, item in enumerate(updated_data):
+                            option = selected_options.get(i)
+                            if option == "None": continue
+
+                            try:
+                                image = Image.open(BytesIO(item['original_data']))
+                                if option in ["regen_text", "regen_all"]:
+                                    base_from_api, alt_text, api_error = _generate_ai_metadata(image, client, config)
+                                    item['alt_text'] = alt_text
+                                    new_unique_filename = _finalize_filename(base_from_api, config['sanitized_project_number'], existing_filenames)
+                                    item['optimized_filename'] = new_unique_filename
+                                    existing_filenames.add(new_unique_filename)
+                                    if api_error: st.warning(f"OpenAI API Error for {item['original_filename']}: {api_error}")
+                                
+                                if option in ["recompress", "regen_all"]:
+                                    compressed_data, compressed_size = _compress_image(image, config['compression_quality'])
+                                    item['compressed_data'] = compressed_data
+                                    item['compressed_size_bytes'] = compressed_size
+                                    item['savings_percentage'] = ((item['original_size_bytes'] - compressed_size) / item['original_size_bytes']) * 100 if item['original_size_bytes'] > 0 else 0.0
+                            except Exception as e:
+                                st.error(f"Error re-optimizing {item['original_filename']}: {e}")
                     
-                    st.session_state.bulk_processed_data = updated_processed_data
+                    st.session_state.bulk_processed_data = updated_data
                     st.success("Re-optimization complete!")
-                    time.sleep(1) # Give user time to see success message
+                    time.sleep(1)
                     st.rerun()
 
         for i_disp, item in enumerate(st.session_state.bulk_processed_data):
             is_expanded = st.session_state.bulk_compare_index == i_disp
             with st.expander(f"Image {i_disp+1}: {item.get('original_filename', 'N/A')}", expanded=is_expanded):
                 with st.container(border=True):
-                    # --- NEW: Checkbox for re-optimization ---
-                    st.checkbox("Select to Re-optimize", key=f"reoptimize_cb_{i_disp}", value=False)
+                    st.radio(
+                        "Re-optimization Action:",
+                        options=[('None', 'None'), ('Re-gen Text', 'regen_text'), ('Re-compress', 'recompress'), ('Regen All', 'regen_all')],
+                        key=f"reoptimize_option_{i_disp}",
+                        horizontal=True,
+                        format_func=lambda x: x[0],
+                        index=0
+                    )
                     st.markdown("---")
                     
                     col1_exp, col2_exp = st.columns([2, 1])
                     with col1_exp:
                         st.text_input("Optimized Filename", value=item.get('optimized_filename', 'N/A'), key=f"bulk_fn_{i_disp}", on_change=update_bulk_filename, args=(i_disp,))
                         st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=100, key=f"bulk_alt_{i_disp}", on_change=update_bulk_alt_text, args=(i_disp,))
-                        
-                        # --- NEW: Copy-paste friendly output ---
                         st.markdown("**Copy-Paste Friendly Output**")
                         copy_paste_text = f"Filename: /{item.get('optimized_filename', '')}\nAlt text: {item.get('alt_text', '')}"
                         st.code(copy_paste_text, language='text')
 
                     with col2_exp:
-                        # --- NEW: Showcase compression values ---
                         st.metric(label="Original Size", value=format_size(item['original_size_bytes']))
-                        st.metric(label="Compressed Size", value=format_size(item['compressed_size_bytes']), delta=f"-{item['savings_percentage']:.1f}%")
+                        st.metric(label="Compressed Size", value=format_size(item['compressed_size_bytes']), delta=f"-{item['savings_percentage']:.1f}%", delta_color="inverse")
                         st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview")
                     
                     st.markdown("---")
@@ -405,15 +425,13 @@ with tab2:
             st.text_input("Optimized Filename", value=item.get('optimized_filename', 'N/A'), key="single_fn_edit", on_change=update_single_filename)
             st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=100, key="single_alt_edit", on_change=update_single_alt_text)
 
-            # --- NEW: Copy-paste friendly output ---
             st.markdown("**Copy-Paste Friendly Output**")
             copy_paste_text_single = f"Filename: /{item.get('optimized_filename', '')}\nAlt text: {item.get('alt_text', '')}"
             st.code(copy_paste_text_single, language='text')
             
-            metric_col1, metric_col2, metric_col3 = st.columns(3)
+            metric_col1, metric_col2 = st.columns(2)
             metric_col1.metric(label="Original Size", value=format_size(item['original_size_bytes']))
-            metric_col2.metric(label="Compressed Size", value=format_size(item['compressed_size_bytes']))
-            metric_col3.metric(label="Savings", value=f"{item['savings_percentage']:.1f}%")
+            metric_col2.metric(label="Compressed Size", value=format_size(item['compressed_size_bytes']), delta=f"-{item['savings_percentage']:.1f}%", delta_color="inverse")
             
             st.download_button(label="📥 Download Optimized Image (.webp)", data=item['compressed_data'], file_name=item['optimized_filename'], mime='image/webp', key='single_download_button')
             st.divider()
