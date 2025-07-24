@@ -85,40 +85,34 @@ def _compress_image(image, quality):
     return compressed_image_data, len(compressed_image_data)
 
 def _generate_ai_metadata(image, client, config):
-    """Generates filename, title, and alt text using OpenAI API."""
+    """Generates filename and alt text using OpenAI API."""
     openai_image_buffer = BytesIO()
     image.save(openai_image_buffer, format="PNG")
     base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
-    has_context = config['product_type'] or config['city_geo_target']
-
+    has_filename_context = config['product_type'] or config['city_geo_target']
+    has_alt_text_context = config['service_type'] or config['product_type'] or config['city_geo_target'] or config['additional_context']
     filename_instructions = """
-- Create a long, descriptive, hyphenated filename.
-- Use the **Product Type** as the primary basis.
-- Enhance it with specific nouns from the **Primary Keyword** (e.g., 'patio-door').
+- Use the **Product Type** as the primary basis for the filename.
+- Enhance it with specific nouns from the **Primary Keyword** if they add necessary detail (e.g., 'patio-door').
 - Include the **Location**. Do **NOT** include the Service Type or Additional Context.
 - **GOOD Example:** `lifestyle-series-picture-windows-patio-door-salina-ks`
-""" if has_context else """
+""" if has_filename_context else """
 - **Analyze the image for its main visual subject** (e.g., 'bay window', 'tan siding').
 - Build the filename **primarily from these visual details**.
-- **GOOD Example:** `tan-siding-bay-window-exterior-home`
-"""
-    image_title_instructions = """
-- Create a concise, descriptive, hyphenated title.
-- It should be **similar to the `base_filename` but shorter.**
-- The final `image_title` **MUST NOT exceed 50 characters.**
-- **GOOD Example:** `lifestyle-windows-patio-door-salina`
-""" if has_context else """
-- Create a concise, hyphenated title based on the main visual subject.
-- The final `image_title` **MUST NOT exceed 50 characters.**
-- **GOOD Example:** `tan-siding-bay-window-home`
+- **GOOD Example:** `tan-siding-bay-window-exterior`
 """
     alt_text_instructions = """
-- Tell a short, descriptive story about the image. Start with the main visual subject, then weave in the context.
+- Tell a short, descriptive story about the image. Start with the main visual subject, then weave in the context from the background information.
 - The final text **MUST be a single, concise sentence under 125 characters.**
 - **GOOD Example:** "A two-story wall of Pella Lifestyle Series picture windows and a new patio door, shown after a full replacement project in Salina, KS."
+""" if has_alt_text_context else """
+- Identify 2-3 of the most important visual details in the image (e.g., window arrangement, door style, siding color).
+- Combine these details into a descriptive, human-sounding sentence that also includes the **Primary Keyword**.
+- The final text **MUST be a single, concise sentence under 125 characters.**
+- **GOOD Example:** "Large picture windows above a three-panel sliding glass door on a home with tan siding, providing a modern exterior."
 """
     prompt_text_for_api = f"""
-Your task is to analyze the image and generate a single, valid JSON object with `base_filename`, `image_title`, and `alt_text`.
+Your task is to analyze the image and generate a single, valid JSON object with `base_filename` and `alt_text`.
 **BACKGROUND INFORMATION:**
 - Primary Keyword: '{config['keyword']}'
 - Service Type: '{config['service_type'] or "Not provided"}'
@@ -128,32 +122,28 @@ Your task is to analyze the image and generate a single, valid JSON object with 
 **YOUR INSTRUCTIONS:**
 1.  **For `base_filename`**:
 {filename_instructions}
-2.  **For `image_title`**:
-{image_title_instructions}
-3.  **For `alt_text`**:
+2.  **For `alt_text`**:
 {alt_text_instructions}
 **IMPORTANT: Output ONLY the final, polished JSON object.**
 ```json
 {{
-  "base_filename": "your-long-descriptive-hyphenated-name",
-  "image_title": "your-shorter-hyphenated-title-under-50-chars",
+  "base_filename": "your-descriptive-hyphenated-name",
   "alt_text": "Your natural, human-sounding alt text."
 }}```
 """
     messages = [{"role": "user", "content": [{"type": "text", "text": prompt_text_for_api}, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}]}]
-    base_filename, image_title, alt_text, api_error = "api-error", "api-error", f"Image of {config['keyword']}", None
+    base_filename_from_api, alt_text, api_error = f"api-error-processing", f"Image related to {config['keyword']}", None
     try:
-        response = client.chat.completions.create(model="gpt-4o", messages=messages, max_tokens=250, temperature=0.4, response_format={"type": "json_object"})
+        response = client.chat.completions.create(model="gpt-4o", messages=messages, max_tokens=200, temperature=0.4, response_format={"type": "json_object"})
         output = response.choices[0].message.content.strip()
         result = json.loads(output)
-        base_filename = result.get("base_filename", "optimized-image-fallback")
-        image_title = result.get("image_title", "short-image-title")
+        base_filename_from_api = result.get("base_filename", f"optimized-image-fallback")
         alt_text = result.get("alt_text", f"Image of {config['keyword']}")
-        if base_filename.endswith(('.webp', '.png', '.jpg')):
-             base_filename = os.path.splitext(base_filename)[0]
+        if base_filename_from_api.endswith(('.webp', '.png', '.jpg')):
+             base_filename_from_api = os.path.splitext(base_filename_from_api)[0]
     except Exception as api_e:
         api_error = f"OpenAI API Err: {api_e}"
-    return base_filename, image_title, alt_text, api_error
+    return base_filename_from_api, alt_text, api_error
 
 def _finalize_filename(base_name, proj_num_sanitized, existing_filenames):
     """Takes a base name and creates a final, unique, sanitized filename."""
@@ -173,6 +163,11 @@ def _finalize_filename(base_name, proj_num_sanitized, existing_filenames):
         counter += 1
     return unique_filename
 
+def create_title_from_filename(filename):
+    """Creates a capitalized title from a hyphenated filename."""
+    base_name = os.path.splitext(filename)[0]
+    return base_name.replace('-', ' ').title()
+
 def process_image(source, client, config, existing_filenames=None):
     """Processes a single image: fetches, compresses, and gets AI metadata."""
     if existing_filenames is None: existing_filenames = set()
@@ -186,8 +181,10 @@ def process_image(source, client, config, existing_filenames=None):
         original_size_bytes = len(original_image_data)
         compressed_image_data, compressed_size_bytes = _compress_image(image, config['compression_quality'])
         savings_percentage = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100 if original_size_bytes > 0 else 0.0
-        base_filename, image_title, alt_text, api_error = _generate_ai_metadata(image, client, config)
-        unique_filename = _finalize_filename(base_filename, config['sanitized_project_number'], existing_filenames)
+        
+        base_filename_from_api, alt_text, api_error = _generate_ai_metadata(image, client, config)
+        unique_filename = _finalize_filename(base_filename_from_api, config['sanitized_project_number'], existing_filenames)
+        image_title = create_title_from_filename(unique_filename)
         
         return {
             "status": "success", "original_filename": original_filename, "optimized_filename": unique_filename,
@@ -232,12 +229,19 @@ def update_bulk_filename(index):
 def update_bulk_alt_text(index):
     st.session_state.bulk_processed_data[index]['alt_text'] = st.session_state[f"bulk_alt_{index}"]
 
+def update_bulk_title(index):
+    st.session_state.bulk_processed_data[index]['image_title'] = st.session_state[f"bulk_title_{index}"]
+
 def update_single_filename():
     new_filename = st.session_state["single_fn_edit"]
     st.session_state.single_processed_item['optimized_filename'] = sanitize_filename(new_filename)
 
 def update_single_alt_text():
     st.session_state.single_processed_item['alt_text'] = st.session_state["single_alt_edit"]
+
+def update_single_title():
+    st.session_state.single_processed_item['image_title'] = st.session_state["single_title_edit"]
+
 
 # --- Tabbed Interface ---
 tab1, tab2 = st.tabs(["Bulk Image Optimizer", "Singular Image Optimizer"])
@@ -290,7 +294,7 @@ with tab1:
 
     if st.session_state.bulk_processed_data:
         st.header("📊 Results & Downloads")
-        display_df_data = [{"Optimized Filename": item["optimized_filename"], "Alt Text": item["alt_text"]} for item in st.session_state.bulk_processed_data]
+        display_df_data = [{"Optimized Filename": item["optimized_filename"], "Image Title": item["image_title"], "Alt Text": item["alt_text"]} for item in st.session_state.bulk_processed_data]
         st.dataframe(pd.DataFrame(display_df_data), use_container_width=True)
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
@@ -327,6 +331,7 @@ with tab1:
                                     item['alt_text'] = alt_text
                                     new_unique_filename = _finalize_filename(base_from_api, config['sanitized_project_number'], existing_filenames)
                                     item['optimized_filename'] = new_unique_filename
+                                    item['image_title'] = create_title_from_filename(new_unique_filename) # Regenerate title
                                     existing_filenames.add(new_unique_filename)
                                     if api_error: st.warning(f"OpenAI API Error for {item['original_filename']}: {api_error}")
                                 
@@ -343,14 +348,12 @@ with tab1:
                     time.sleep(1)
                     st.rerun()
         
-        # --- CORRECTED: Moved map definition outside the loop ---
         reoptimize_options_map = {'none': 'None', 'regen_text': 'Re-gen Text', 'recompress': 'Re-compress', 'regen_all': 'Re-gen All'}
 
         for i_disp, item in enumerate(st.session_state.bulk_processed_data):
             is_expanded = st.session_state.bulk_compare_index == i_disp
             with st.expander(f"Image {i_disp+1}: {item.get('original_filename', 'N/A')}", expanded=is_expanded):
                 with st.container(border=True):
-                    # --- CORRECTED: Radio button now stores a simple string key ---
                     st.radio(
                         "Re-optimization Action:",
                         options=list(reoptimize_options_map.keys()),
@@ -372,9 +375,9 @@ with tab1:
                         st.text_input("Optimized Filename", value=filename, key=f"bulk_fn_{i_disp}", on_change=update_bulk_filename, args=(i_disp,))
                         st.caption(f"Character count: {len(filename)}")
                         
-                        st.text_input("Image Title (for CMS)", value=image_title, disabled=True, help="This is auto-generated and cannot be edited directly.")
+                        st.text_input("Image Title", value=image_title, key=f"bulk_title_{i_disp}", on_change=update_bulk_title, args=(i_disp,))
                         st.caption(f"Character count: {len(image_title)}")
-
+                        
                         st.text_area("Generated Alt Text", value=alt_text, height=100, key=f"bulk_alt_{i_disp}", on_change=update_bulk_alt_text, args=(i_disp,))
                         st.caption(f"Character count: {len(alt_text)}")
 
@@ -448,7 +451,7 @@ with tab2:
             st.text_input("Optimized Filename", value=filename, key="single_fn_edit", on_change=update_single_filename)
             st.caption(f"Character count: {len(filename)}")
             
-            st.text_input("Image Title (for CMS)", value=image_title, disabled=True, help="This is auto-generated and cannot be edited directly.")
+            st.text_input("Image Title", value=image_title, key="single_title_edit", on_change=update_single_title)
             st.caption(f"Character count: {len(image_title)}")
             
             st.text_area("Generated Alt Text", value=alt_text, height=100, key="single_alt_edit", on_change=update_single_alt_text)
@@ -483,4 +486,4 @@ with tab2:
                      st.session_state.single_compare_active = True
                      st.rerun()
             else:
-                st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview (Comparison tool not available)")
+                st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview (Comparison tool not available)")```
