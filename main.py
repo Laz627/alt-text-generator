@@ -486,4 +486,4 @@ with tab2:
                      st.session_state.single_compare_active = True
                      st.rerun()
             else:
-                st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview (Comparison tool not available)")```
+                st.image(BytesIO(item["compressed_data"]), caption="Compressed Preview (Comparison tool not available)")
