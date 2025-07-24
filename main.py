@@ -34,7 +34,7 @@ def sanitize_filename(filename):
         ext = '.webp'
     return f"{sanitized_base}{ext}"
 
-def truncate_filename(filename, max_length=80):
+def truncate_filename(filename, max_length=50):
     """Truncates a filename to a max length, preserving the extension."""
     if len(filename) <= max_length: return filename
     base_name, extension = os.path.splitext(filename)
@@ -93,12 +93,14 @@ def _generate_ai_metadata(image, client, config):
     has_alt_text_context = config['service_type'] or config['product_type'] or config['city_geo_target'] or config['additional_context']
     filename_instructions = """
 - Use the **Product Type** as the primary basis for the filename.
-- Enhance it with specific nouns from the **Primary Keyword** if they add necessary detail (e.g., 'patio-door').
+- Enhance it with specific nouns from the **Primary Keyword** if they add necessary detail.
 - Include the **Location**. Do **NOT** include the Service Type or Additional Context.
-- **GOOD Example:** `lifestyle-series-picture-windows-patio-door-salina-ks`
+- The final `base_filename` **MUST NOT exceed 50 characters.**
+- **GOOD Example:** `lifestyle-series-windows-patio-door-salina-ks`
 """ if has_filename_context else """
 - **Analyze the image for its main visual subject** (e.g., 'bay window', 'tan siding').
 - Build the filename **primarily from these visual details**.
+- The final `base_filename` **MUST NOT exceed 50 characters.**
 - **GOOD Example:** `tan-siding-bay-window-exterior`
 """
     alt_text_instructions = """
@@ -352,10 +354,12 @@ with tab1:
                     
                     col1_exp, col2_exp = st.columns([2, 1])
                     with col1_exp:
-                        st.text_input("Optimized Filename", value=item.get('optimized_filename', 'N/A'), key=f"bulk_fn_{i_disp}", on_change=update_bulk_filename, args=(i_disp,))
-                        st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=100, key=f"bulk_alt_{i_disp}", on_change=update_bulk_alt_text, args=(i_disp,))
+                        filename = item.get('optimized_filename', '')
+                        alt_text = item.get('alt_text', '')
+                        st.text_input("Optimized Filename", value=filename, key=f"bulk_fn_{i_disp}", on_change=update_bulk_filename, args=(i_disp,), help=f"Character count: {len(filename)}")
+                        st.text_area("Generated Alt Text", value=alt_text, height=100, key=f"bulk_alt_{i_disp}", on_change=update_bulk_alt_text, args=(i_disp,), help=f"Character count: {len(alt_text)}")
                         st.markdown("**Copy-Paste Friendly Output**")
-                        copy_paste_text = f"Filename: /{item.get('optimized_filename', '')}\nAlt text: {item.get('alt_text', '')}"
+                        copy_paste_text = f"Filename: /{filename}\nAlt text: {alt_text}"
                         st.code(copy_paste_text, language='text')
 
                     with col2_exp:
@@ -413,12 +417,14 @@ with tab2:
         item = st.session_state.single_processed_item
         st.header("📊 Result & Download")
         with st.container(border=True):
+            filename = item.get('optimized_filename', '')
+            alt_text = item.get('alt_text', '')
             st.markdown(f"**Original Filename:** `{item['original_filename']}`")
-            st.text_input("Optimized Filename", value=item.get('optimized_filename', 'N/A'), key="single_fn_edit", on_change=update_single_filename)
-            st.text_area("Generated Alt Text", value=item.get('alt_text', 'N/A'), height=100, key="single_alt_edit", on_change=update_single_alt_text)
+            st.text_input("Optimized Filename", value=filename, key="single_fn_edit", on_change=update_single_filename, help=f"Character count: {len(filename)}")
+            st.text_area("Generated Alt Text", value=alt_text, height=100, key="single_alt_edit", on_change=update_single_alt_text, help=f"Character count: {len(alt_text)}")
 
             st.markdown("**Copy-Paste Friendly Output**")
-            copy_paste_text_single = f"Filename: /{item.get('optimized_filename', '')}\nAlt text: {item.get('alt_text', '')}"
+            copy_paste_text_single = f"Filename: /{filename}\nAlt text: {alt_text}"
             st.code(copy_paste_text_single, language='text')
             
             metric_col1, metric_col2 = st.columns(2)
