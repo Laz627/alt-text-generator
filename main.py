@@ -34,7 +34,7 @@ def sanitize_filename(filename):
         ext = '.webp'
     return f"{sanitized_base}{ext}"
 
-def truncate_filename(filename, max_length=50):
+def truncate_filename(filename, max_length=80):
     """Truncates a filename to a max length, preserving the extension."""
     if len(filename) <= max_length: return filename
     base_name, extension = os.path.splitext(filename)
@@ -85,36 +85,40 @@ def _compress_image(image, quality):
     return compressed_image_data, len(compressed_image_data)
 
 def _generate_ai_metadata(image, client, config):
-    """Generates filename and alt text using OpenAI API."""
+    """Generates filename, title, and alt text using OpenAI API."""
     openai_image_buffer = BytesIO()
     image.save(openai_image_buffer, format="PNG")
     base64_image = base64.b64encode(openai_image_buffer.getvalue()).decode('utf-8')
-    has_filename_context = config['product_type'] or config['city_geo_target']
-    has_alt_text_context = config['service_type'] or config['product_type'] or config['city_geo_target'] or config['additional_context']
+    has_context = config['product_type'] or config['city_geo_target']
+
     filename_instructions = """
-- Use the **Product Type** as the primary basis for the filename.
-- Enhance it with specific nouns from the **Primary Keyword** if they add necessary detail.
+- Create a long, descriptive, hyphenated filename.
+- Use the **Product Type** as the primary basis.
+- Enhance it with specific nouns from the **Primary Keyword** (e.g., 'patio-door').
 - Include the **Location**. Do **NOT** include the Service Type or Additional Context.
-- The final `base_filename` **MUST NOT exceed 50 characters.**
-- **GOOD Example:** `lifestyle-series-windows-patio-door-salina-ks`
-""" if has_filename_context else """
+- **GOOD Example:** `lifestyle-series-picture-windows-patio-door-salina-ks`
+""" if has_context else """
 - **Analyze the image for its main visual subject** (e.g., 'bay window', 'tan siding').
 - Build the filename **primarily from these visual details**.
-- The final `base_filename` **MUST NOT exceed 50 characters.**
-- **GOOD Example:** `tan-siding-bay-window-exterior`
+- **GOOD Example:** `tan-siding-bay-window-exterior-home`
+"""
+    image_title_instructions = """
+- Create a concise, descriptive, hyphenated title.
+- It should be **similar to the `base_filename` but shorter.**
+- The final `image_title` **MUST NOT exceed 50 characters.**
+- **GOOD Example:** `lifestyle-windows-patio-door-salina`
+""" if has_context else """
+- Create a concise, hyphenated title based on the main visual subject.
+- The final `image_title` **MUST NOT exceed 50 characters.**
+- **GOOD Example:** `tan-siding-bay-window-home`
 """
     alt_text_instructions = """
-- Tell a short, descriptive story about the image. Start with the main visual subject, then weave in the context from the background information.
+- Tell a short, descriptive story about the image. Start with the main visual subject, then weave in the context.
 - The final text **MUST be a single, concise sentence under 125 characters.**
 - **GOOD Example:** "A two-story wall of Pella Lifestyle Series picture windows and a new patio door, shown after a full replacement project in Salina, KS."
-""" if has_alt_text_context else """
-- Identify 2-3 of the most important visual details in the image (e.g., window arrangement, door style, siding color).
-- Combine these details into a descriptive, human-sounding sentence that also includes the **Primary Keyword**.
-- The final text **MUST be a single, concise sentence under 125 characters.**
-- **GOOD Example:** "Large picture windows above a three-panel sliding glass door on a home with tan siding, providing a modern exterior."
 """
     prompt_text_for_api = f"""
-Your task is to analyze the image and generate a single, valid JSON object with `base_filename` and `alt_text`.
+Your task is to analyze the image and generate a single, valid JSON object with `base_filename`, `image_title`, and `alt_text`.
 **BACKGROUND INFORMATION:**
 - Primary Keyword: '{config['keyword']}'
 - Service Type: '{config['service_type'] or "Not provided"}'
@@ -124,28 +128,32 @@ Your task is to analyze the image and generate a single, valid JSON object with 
 **YOUR INSTRUCTIONS:**
 1.  **For `base_filename`**:
 {filename_instructions}
-2.  **For `alt_text`**:
+2.  **For `image_title`**:
+{image_title_instructions}
+3.  **For `alt_text`**:
 {alt_text_instructions}
 **IMPORTANT: Output ONLY the final, polished JSON object.**
 ```json
 {{
-  "base_filename": "your-descriptive-hyphenated-name",
+  "base_filename": "your-long-descriptive-hyphenated-name",
+  "image_title": "your-shorter-hyphenated-title-under-50-chars",
   "alt_text": "Your natural, human-sounding alt text."
 }}```
 """
     messages = [{"role": "user", "content": [{"type": "text", "text": prompt_text_for_api}, {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}]}]
-    base_filename_from_api, alt_text, api_error = f"api-error-processing", f"Image related to {config['keyword']}", None
+    base_filename, image_title, alt_text, api_error = "api-error", "api-error", f"Image of {config['keyword']}", None
     try:
-        response = client.chat.completions.create(model="gpt-4o", messages=messages, max_tokens=200, temperature=0.4, response_format={"type": "json_object"})
+        response = client.chat.completions.create(model="gpt-4o", messages=messages, max_tokens=250, temperature=0.4, response_format={"type": "json_object"})
         output = response.choices[0].message.content.strip()
         result = json.loads(output)
-        base_filename_from_api = result.get("base_filename", f"optimized-image-fallback")
+        base_filename = result.get("base_filename", "optimized-image-fallback")
+        image_title = result.get("image_title", "short-image-title")
         alt_text = result.get("alt_text", f"Image of {config['keyword']}")
-        if base_filename_from_api.endswith(('.webp', '.png', '.jpg')):
-             base_filename_from_api = os.path.splitext(base_filename_from_api)[0]
+        if base_filename.endswith(('.webp', '.png', '.jpg')):
+             base_filename = os.path.splitext(base_filename)[0]
     except Exception as api_e:
         api_error = f"OpenAI API Err: {api_e}"
-    return base_filename_from_api, alt_text, api_error
+    return base_filename, image_title, alt_text, api_error
 
 def _finalize_filename(base_name, proj_num_sanitized, existing_filenames):
     """Takes a base name and creates a final, unique, sanitized filename."""
@@ -178,14 +186,15 @@ def process_image(source, client, config, existing_filenames=None):
         original_size_bytes = len(original_image_data)
         compressed_image_data, compressed_size_bytes = _compress_image(image, config['compression_quality'])
         savings_percentage = ((original_size_bytes - compressed_size_bytes) / original_size_bytes) * 100 if original_size_bytes > 0 else 0.0
-        base_filename_from_api, alt_text, api_error = _generate_ai_metadata(image, client, config)
-        unique_filename = _finalize_filename(base_filename_from_api, config['sanitized_project_number'], existing_filenames)
+        base_filename, image_title, alt_text, api_error = _generate_ai_metadata(image, client, config)
+        unique_filename = _finalize_filename(base_filename, config['sanitized_project_number'], existing_filenames)
         
         return {
             "status": "success", "original_filename": original_filename, "optimized_filename": unique_filename,
-            "alt_text": alt_text, "original_size_bytes": original_size_bytes, "compressed_size_bytes": compressed_size_bytes,
-            "savings_percentage": savings_percentage, "image_url": source if isinstance(source, str) else None,
-            "compressed_data": compressed_image_data, "original_data": original_image_data, "api_error": api_error
+            "image_title": image_title, "alt_text": alt_text, "original_size_bytes": original_size_bytes, 
+            "compressed_size_bytes": compressed_size_bytes, "savings_percentage": savings_percentage, 
+            "image_url": source if isinstance(source, str) else None, "compressed_data": compressed_image_data, 
+            "original_data": original_image_data, "api_error": api_error
         }
     except Exception as process_e:
          return {"status": "error", "message": f"Error during processing: {process_e}", "original_filename": original_filename}
@@ -354,10 +363,22 @@ with tab1:
                     
                     col1_exp, col2_exp = st.columns([2, 1])
                     with col1_exp:
+                        # Fetch values
                         filename = item.get('optimized_filename', '')
+                        image_title = item.get('image_title', '')
                         alt_text = item.get('alt_text', '')
-                        st.text_input("Optimized Filename", value=filename, key=f"bulk_fn_{i_disp}", on_change=update_bulk_filename, args=(i_disp,), help=f"Character count: {len(filename)}")
-                        st.text_area("Generated Alt Text", value=alt_text, height=100, key=f"bulk_alt_{i_disp}", on_change=update_bulk_alt_text, args=(i_disp,), help=f"Character count: {len(alt_text)}")
+
+                        # Display fields with character counters
+                        st.text_input("Optimized Filename", value=filename, key=f"bulk_fn_{i_disp}", on_change=update_bulk_filename, args=(i_disp,))
+                        st.caption(f"Character count: {len(filename)}")
+                        
+                        st.text_input("Image Title (for CMS)", value=image_title, disabled=True, help="This is auto-generated and cannot be edited directly.")
+                        st.caption(f"Character count: {len(image_title)}")
+
+                        st.text_area("Generated Alt Text", value=alt_text, height=100, key=f"bulk_alt_{i_disp}", on_change=update_bulk_alt_text, args=(i_disp,))
+                        st.caption(f"Character count: {len(alt_text)}")
+
+                        # Update copy-paste output
                         st.markdown("**Copy-Paste Friendly Output**")
                         copy_paste_text = f"Filename: /{filename}\nAlt text: {alt_text}"
                         st.code(copy_paste_text, language='text')
@@ -417,12 +438,23 @@ with tab2:
         item = st.session_state.single_processed_item
         st.header("📊 Result & Download")
         with st.container(border=True):
+            # Fetch values
             filename = item.get('optimized_filename', '')
+            image_title = item.get('image_title', '')
             alt_text = item.get('alt_text', '')
-            st.markdown(f"**Original Filename:** `{item['original_filename']}`")
-            st.text_input("Optimized Filename", value=filename, key="single_fn_edit", on_change=update_single_filename, help=f"Character count: {len(filename)}")
-            st.text_area("Generated Alt Text", value=alt_text, height=100, key="single_alt_edit", on_change=update_single_alt_text, help=f"Character count: {len(alt_text)}")
 
+            # Display fields with character counters
+            st.markdown(f"**Original Filename:** `{item['original_filename']}`")
+            st.text_input("Optimized Filename", value=filename, key="single_fn_edit", on_change=update_single_filename)
+            st.caption(f"Character count: {len(filename)}")
+            
+            st.text_input("Image Title (for CMS)", value=image_title, disabled=True, help="This is auto-generated and cannot be edited directly.")
+            st.caption(f"Character count: {len(image_title)}")
+            
+            st.text_area("Generated Alt Text", value=alt_text, height=100, key="single_alt_edit", on_change=update_single_alt_text)
+            st.caption(f"Character count: {len(alt_text)}")
+
+            # Update copy-paste output
             st.markdown("**Copy-Paste Friendly Output**")
             copy_paste_text_single = f"Filename: /{filename}\nAlt text: {alt_text}"
             st.code(copy_paste_text_single, language='text')
